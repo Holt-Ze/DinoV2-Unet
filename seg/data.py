@@ -84,14 +84,15 @@ class CVCClinicDBDataset(Dataset):
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
                  aug_mode: str = "strong"):
         super().__init__()
-        if tifffile is None:
-            raise RuntimeError("tifffile is required for CVC-ClinicDB. Install with `pip install tifffile imagecodecs`.")
         self.img_dir = os.path.join(data_dir, "Original")
         self.msk_dir = os.path.join(data_dir, "Ground Truth")
-        if not os.path.isdir(self.img_dir):
-            raise FileNotFoundError(f"Image folder not found: {self.img_dir}")
-        if not os.path.isdir(self.msk_dir):
-            raise FileNotFoundError(f"Mask folder not found: {self.msk_dir}")
+        if not (os.path.isdir(self.img_dir) and os.path.isdir(self.msk_dir)):
+            alt_img = os.path.join(data_dir, "images")
+            alt_msk = os.path.join(data_dir, "masks")
+            if os.path.isdir(alt_img) and os.path.isdir(alt_msk):
+                self.img_dir, self.msk_dir = alt_img, alt_msk
+            else:
+                raise FileNotFoundError(f"Image folder not found: {self.img_dir}")
         valid_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
         names = [f for f in sorted(os.listdir(self.img_dir)) if os.path.splitext(f)[1].lower() in valid_exts]
         if not names:
@@ -123,6 +124,8 @@ class CVCClinicDBDataset(Dataset):
     def _read_image(path: str, is_mask: bool):
         ext = os.path.splitext(path)[1].lower()
         if ext in {".tif", ".tiff"}:
+            if tifffile is None:
+                raise RuntimeError("tifffile is required for TIFF files. Install with `pip install tifffile imagecodecs`.")
             return tifffile.imread(path)
         mode = "L" if is_mask else "RGB"
         return np.array(Image.open(path).convert(mode))
@@ -303,7 +306,7 @@ DATASET_SPECS: Dict[str, DatasetSpec] = {
     "kvasir": DatasetSpec(KvasirSEG, "Kvasir-SEG", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_kvasir")),
     "clinicdb": DatasetSpec(CVCClinicDBDataset, "CVC-ClinicDB", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_clinicdb"), True),
     "colondb": DatasetSpec(CVCColonDB, "CVC-ColonDB", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_colondb")),
-    "etis": DatasetSpec(ETISLaribDataset, "ETIS-LaribPolypDB", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_etis")),
+    "etis": DatasetSpec(ETISLaribDataset, "ETIS", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_etis")),
 }
 
 DATASET_ALIASES: Dict[str, str] = {
@@ -313,6 +316,10 @@ DATASET_ALIASES: Dict[str, str] = {
     "colon": "colondb",
     "cvc-colondb": "colondb",
     "etis-larib": "etis",
+}
+
+DATASET_SUBDIR_FALLBACKS: Dict[str, Tuple[str, ...]] = {
+    "etis": ("ETIS-LaribPolypDB",),
 }
 
 
@@ -326,5 +333,15 @@ def resolve_data_dir(spec: DatasetSpec, override: Optional[str]) -> str:
         return os.path.abspath(override)
     if spec.default_subdir is None:
         raise ValueError("No default data directory defined; please provide --data-dir.")
-    return os.path.abspath(os.path.join(DEFAULT_DATA_ROOT, spec.default_subdir))
+    primary = os.path.abspath(os.path.join(DEFAULT_DATA_ROOT, spec.default_subdir))
+    if os.path.isdir(primary):
+        return primary
+    # Try known alternative folder names.
+    for key, fallbacks in DATASET_SUBDIR_FALLBACKS.items():
+        if spec is DATASET_SPECS.get(key):
+            for name in fallbacks:
+                candidate = os.path.abspath(os.path.join(DEFAULT_DATA_ROOT, name))
+                if os.path.isdir(candidate):
+                    return candidate
+    return primary
 

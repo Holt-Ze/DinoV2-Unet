@@ -53,6 +53,8 @@ def parse_args():
                         help="UNet 解码器内部的 Dropout 概率。")
     parser.add_argument("--no-tta", action="store_true",
                         help="禁用测试阶段的水平翻转 TTA。")
+    parser.add_argument("--no-profile", action="store_true",
+                        help="Disable model Params/FLOPs/FPS profiling.")
     return parser.parse_args()
 
 
@@ -90,6 +92,7 @@ def main():
         aug_mode=args.aug_mode,
         decoder_dropout=args.decoder_dropout,
         use_tta=not args.no_tta,
+        profile=not args.no_profile,
     )
 
     run_training(cfg, dataset_key, spec)

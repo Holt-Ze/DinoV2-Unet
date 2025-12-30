@@ -15,6 +15,7 @@ from .metrics import compute_segmentation_metrics, dice_iou_from_logits
 from .models import DinoV2UNet
 from .transforms import denorm
 from .utils import set_seed
+from .profiling import describe_profile
 
 
 class EarlyStopping:
@@ -73,6 +74,7 @@ class TrainConfig:
     aug_mode: str = "strong"
     decoder_dropout: float = 0.2
     use_tta: bool = True
+    profile: bool = True
 
 
 def make_optimizers(model: DinoV2UNet, cfg: TrainConfig):
@@ -191,6 +193,11 @@ def run_training(cfg: TrainConfig, dataset_key: str, spec: Optional[DatasetSpec]
         print(f"Requested img_size {cfg.img_size} is not divisible by encoder patch size {patch_size}. "
               f"Resizing to {new_size}.")
         cfg.img_size = new_size
+
+    if cfg.profile:
+        use_amp = (not cfg.no_amp and device == "cuda")
+        profile_msg = describe_profile(model, (cfg.img_size, cfg.img_size), device, use_amp=use_amp)
+        print(profile_msg)
 
     train_ds = dataset_cls(cfg.data_dir, 'train', cfg.img_size, seed=cfg.seed, aug_mode=cfg.aug_mode)
     val_ds = dataset_cls(cfg.data_dir, 'val', cfg.img_size, seed=cfg.seed, aug_mode='none')
