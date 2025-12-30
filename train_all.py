@@ -1,10 +1,29 @@
 import argparse
 import os
-
+import sys
+import warnings
+import datetime
 from seg.data import DATASET_SPECS, resolve_data_dir, resolve_dataset_key
 from seg.inference import export_dataset_masks
 from seg.training import TrainConfig, run_training
 
+# 过滤警告
+warnings.filterwarnings("ignore", message=".*huggingface_hub.*symlinks.*")
+warnings.filterwarnings("ignore", message=".*Error fetching version info.*")
+
+class Logger(object):
+    def __init__(self, filename, stream):
+        self.terminal = stream
+        self.log = open(filename, "a", encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train DINOv2-UNet on all datasets and export masks.")
@@ -48,7 +67,26 @@ def main():
     datasets = [resolve_dataset_key(x) for x in args.datasets]
     export_splits = resolve_split_list(args.export_splits)
 
+    # 保存原始的 stdout 和 stderr
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+
+    log_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
+    os.makedirs(log_root, exist_ok=True)
+
     for dataset_key in datasets:
+        # 设置每个数据集的日志
+        dataset_log_dir = os.path.join(log_root, dataset_key)
+        os.makedirs(dataset_log_dir, exist_ok=True)
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        log_file = os.path.join(dataset_log_dir, f"{timestamp}.log")
+
+        # 重定向输出
+        logger = Logger(log_file, original_stdout)
+        sys.stdout = logger
+        sys.stderr = logger # 将错误也重定向到同一个日志文件
+
         if dataset_key not in DATASET_SPECS:
             raise ValueError(f"Unsupported dataset '{dataset_key}'.")
         spec = DATASET_SPECS[dataset_key]
@@ -113,6 +151,10 @@ def main():
                 seed=args.seed,
             )
             print(f"Saved masks to {export_dir}")
+        
+    # 恢复原始输出（虽然程序结束了，但这是一个好习惯）
+    sys.stdout = original_stdout
+    sys.stderr = original_stderr
 
 
 if __name__ == "__main__":
