@@ -6,9 +6,9 @@ import numpy as np
 from tqdm import tqdm
 
 # 配置路径
-RUNS_DIR = r"d:\DinoV2-Unet-1\runs"
-DATA_DIR = r"d:\DinoV2-Unet-1\data"
-OUTPUT_DIR = r"d:\DinoV2-Unet-1\comparison_results"
+RUNS_DIR = os.path.join(os.getcwd(), "runs")
+DATA_DIR = os.path.join(os.getcwd(), "data")
+OUTPUT_DIR = os.path.join(os.getcwd(), "comparison_results")
 
 # 确保输出目录存在
 os.makedirs(OUTPUT_DIR, exist_ok=True)

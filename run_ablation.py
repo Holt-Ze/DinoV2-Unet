@@ -6,9 +6,9 @@ from datetime import datetime
 # Configuration
 DATASETS = ['kvasir', 'clinicdb', 'colondb', 'etis']
 # DATASETS = ['kvasir'] # Debug
-LOG_ROOT = r'D:\DinoV2-Unet-1\log\消融实验'
+LOG_ROOT = os.path.join(os.getcwd(), 'log', '消融实验')
 PYTHON_EXE = sys.executable
-SCRIPT_PATH = r'D:\DinoV2-Unet-1\train.py'
+SCRIPT_PATH = os.path.join(os.getcwd(), 'train.py')
 
 def ensure_dir(path):
     if not os.path.exists(path):

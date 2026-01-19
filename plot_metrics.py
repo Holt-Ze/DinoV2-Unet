@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import glob
 
 # Constants
-LOG_ROOT = r'd:\DinoV2-Unet-1\log'
+LOG_ROOT = os.path.join(os.getcwd(), 'log')
 DATASETS = ['clinicdb', 'etis', 'kvasir', 'colondb']
 OUTPUT_FILE_LOSS = 'training_loss.png'
 OUTPUT_FILE_DICE = 'validation_dice.png'
