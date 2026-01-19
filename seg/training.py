@@ -75,11 +75,60 @@ class TrainConfig:
     decoder_dropout: float = 0.2
     use_tta: bool = True
     profile: bool = True
+    subset_ratio: float = 1.0
+    pretrained_type: str = 'dinov2'
+    decoder_type: str = 'simple'
+    optimizer_strategy: str = 'partial_finetune'
 
 
-def make_optimizers(model: DinoV2UNet, cfg: TrainConfig):
+def get_optimizer(model: DinoV2UNet, strategy: str, cfg: TrainConfig):
+    # Adjust requires_grad based on strategy
+    if strategy == 'frozen_encoder':
+        # Linear Probing: Freeze ALL encoder parameters
+        for p in model.encoder.parameters():
+            p.requires_grad = False
+    elif strategy == 'full_finetune':
+        # Unfreeze ALL encoder parameters
+        for p in model.encoder.parameters():
+            p.requires_grad = True
+    elif strategy == 'partial_finetune':
+        # Default: relying on model.__init__ logic which freezes blocks < freeze_blocks_until
+        # But to be safe, we re-apply or just trust the init. 
+        # The user said: "Default: freeze Block 0-5, train 6-11".
+        # VitDinoV2Encoder.__init__ handles the blocks. 
+        # But we should ensure consistency if someone changed it manually or if we want to be explicit.
+        # Let's re-enforce it.
+        # Note: We should handle non-block params? 
+        # Implementation in models.py only touched blocks. 
+        # If we follow "partial_finetune" strictly as "Freeze 0-5", we keep 6-11 open. 
+        # We assume patch_embed/pos_embed are kept as initialized (likely True).
+        # To strictly follow "Freeze 0-5, tune 6-11", we might want to ensure 0-5 are really frozen.
+        # Let's iterate blocks again to be sure.
+        if hasattr(model.encoder, 'model') and hasattr(model.encoder.model, 'blocks'):
+            for i, blk in enumerate(model.encoder.model.blocks):
+                requires = i >= cfg.freeze_blocks_until
+                for p in blk.parameters():
+                    p.requires_grad = requires
+        # For non-block parameters (patch_embed, etc), we leave them as is (usually True) or freeze?
+        # Standard partial finetuning usually freezes the "stem" too if blocks are frozen.
+        # But let's respect the user's specific instruction "Freeze Block 0-5, train 6-11" 
+        # and assume other parts stay as default.
+        pass
+    else:
+        raise ValueError(f"Unknown optimizer strategy: {strategy}")
+
+    # Always ensure decoder is trainable
+    for p in model.decoder.parameters():
+        p.requires_grad = True
+
+    # Filter parameters
     enc_params = [p for n, p in model.named_parameters() if n.startswith('encoder') and p.requires_grad]
     dec_params = [p for n, p in model.named_parameters() if not n.startswith('encoder') and p.requires_grad]
+
+    print(f"Optimizer Strategy: {strategy}")
+    print(f"Trainable Encoder Params: {len(enc_params)}")
+    print(f"Trainable Decoder Params: {len(dec_params)}")
+
     return torch.optim.AdamW([
         {'params': enc_params, 'lr': cfg.lr_backbone, 'name': 'enc'},
         {'params': dec_params, 'lr': cfg.lr, 'name': 'dec'},
@@ -186,7 +235,9 @@ def run_training(cfg: TrainConfig, dataset_key: str, spec: Optional[DatasetSpec]
     dataset_cls = spec.cls
 
     model = DinoV2UNet(cfg.backbone, cfg.out_indices, True, cfg.freeze_blocks_until, 1,
-                       decoder_dropout=cfg.decoder_dropout).to(device)
+                       decoder_dropout=cfg.decoder_dropout,
+                       pretrained_type=cfg.pretrained_type,
+                       decoder_type=cfg.decoder_type).to(device)
     patch_size = getattr(model.encoder, 'patch_size', 1)
     if patch_size > 1 and (cfg.img_size % patch_size) != 0:
         new_size = int(math.ceil(cfg.img_size / patch_size) * patch_size)
@@ -199,7 +250,7 @@ def run_training(cfg: TrainConfig, dataset_key: str, spec: Optional[DatasetSpec]
         profile_msg = describe_profile(model, (cfg.img_size, cfg.img_size), device, use_amp=use_amp)
         print(profile_msg)
 
-    train_ds = dataset_cls(cfg.data_dir, 'train', cfg.img_size, seed=cfg.seed, aug_mode=cfg.aug_mode)
+    train_ds = dataset_cls(cfg.data_dir, 'train', cfg.img_size, seed=cfg.seed, aug_mode=cfg.aug_mode, subset_ratio=cfg.subset_ratio)
     val_ds = dataset_cls(cfg.data_dir, 'val', cfg.img_size, seed=cfg.seed, aug_mode='none')
     test_ds = dataset_cls(cfg.data_dir, 'test', cfg.img_size, seed=cfg.seed, aug_mode='none')
 
@@ -211,7 +262,7 @@ def run_training(cfg: TrainConfig, dataset_key: str, spec: Optional[DatasetSpec]
     test_loader = DataLoader(test_ds, batch_size=cfg.batch_size * 2, shuffle=False,
                              num_workers=cfg.num_workers, pin_memory=True)
 
-    optim = make_optimizers(model, cfg)
+    optim = get_optimizer(model, cfg.optimizer_strategy, cfg)
     scaler = torch.amp.GradScaler('cuda', enabled=(not cfg.no_amp and device == 'cuda'))
     scheduler = build_scheduler(optim, cfg.epochs, max(1, len(train_loader)), cfg.warmup_epochs)
     loss_fn = ComboLoss(0.5, 0.5)

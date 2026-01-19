@@ -19,7 +19,7 @@ except ImportError:
 class KvasirSEG(Dataset):
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong"):
+                 aug_mode: str = "strong", subset_ratio: float = 1.0):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "images")
         self.msk_dir = os.path.join(data_dir, "masks")
@@ -37,6 +37,9 @@ class KvasirSEG(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
+            if subset_ratio < 1.0:
+                limit = max(1, int(len(self.names) * subset_ratio))
+                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -82,7 +85,7 @@ class KvasirSEG(Dataset):
 class CVCClinicDBDataset(Dataset):
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong"):
+                 aug_mode: str = "strong", subset_ratio: float = 1.0):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "Original")
         self.msk_dir = os.path.join(data_dir, "Ground Truth")
@@ -103,6 +106,9 @@ class CVCClinicDBDataset(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
+            if subset_ratio < 1.0:
+                limit = max(1, int(len(self.names) * subset_ratio))
+                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -173,7 +179,7 @@ class CVCClinicDBDataset(Dataset):
 class CVCColonDB(Dataset):
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong"):
+                 aug_mode: str = "strong", subset_ratio: float = 1.0):
         super().__init__()
         if os.path.exists(os.path.join(data_dir, "images")):
             self.img_dir = os.path.join(data_dir, "images")
@@ -195,6 +201,9 @@ class CVCColonDB(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
+            if subset_ratio < 1.0:
+                limit = max(1, int(len(self.names) * subset_ratio))
+                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -239,7 +248,7 @@ class CVCColonDB(Dataset):
 class ETISLaribDataset(Dataset):
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong"):
+                 aug_mode: str = "strong", subset_ratio: float = 1.0):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "images")
         self.msk_dir = os.path.join(data_dir, "masks")
@@ -257,6 +266,9 @@ class ETISLaribDataset(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
+            if subset_ratio < 1.0:
+                limit = max(1, int(len(self.names) * subset_ratio))
+                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
