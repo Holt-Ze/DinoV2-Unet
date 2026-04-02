@@ -1,3 +1,16 @@
+"""DINOv2-UNet training entry point.
+
+Usage:
+    # Train on a single dataset
+    python train.py --dataset kvasir --data-dir ./data/Kvasir-SEG
+
+    # Train on multiple datasets sequentially
+    python train.py --dataset kvasir clinicdb --data-dir ./data
+
+    # Ablation: compare fine-tuning strategies
+    python train.py --dataset kvasir --optimizer-strategy frozen_encoder
+"""
+
 import os
 import sys
 import argparse
@@ -13,7 +26,7 @@ from seg.training import TrainConfig, run_training
 from seg.transforms import VALID_AUG_MODES
 from seg.inference import export_dataset_masks
 
-# Filter warnings
+# Filter non-critical warnings
 warnings.filterwarnings("ignore", message="Error fetching version info", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*huggingface_hub.*symlinks.*")
 
@@ -29,76 +42,116 @@ os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 os.environ["ALBUMENTATIONS_OFFLINE"] = "1"
 
 
-class Logger(object):
-    def __init__(self, filename, stream):
-        self.terminal = stream
-        self.log = open(filename, "a", encoding='utf-8')
+class Logger:
+    """Dual-output logger that writes to both terminal and a log file.
 
-    def write(self, message):
+    Args:
+        filename: Path to the log file.
+        stream: Original output stream (e.g., sys.stdout).
+    """
+
+    def __init__(self, filename: str, stream):
+        self.terminal = stream
+        self.log = open(filename, "a", encoding="utf-8")
+
+    def write(self, message: str) -> None:
         self.terminal.write(message)
         self.log.write(message)
         self.log.flush()
 
-    def flush(self):
+    def flush(self) -> None:
         self.terminal.flush()
         self.log.flush()
 
 
 def parse_args():
-    dataset_choices = sorted(set(list(DATASET_SPECS.keys()) + list(DATASET_ALIASES.keys())))
-    parser = argparse.ArgumentParser(description="Train the DINOv2-UNet polyp segmenter on supported datasets.")
-    parser.add_argument("--data", "--dataset", "--datasets", dest="datasets", nargs='+', required=True,
-                        help=f"One or more dataset keys ({', '.join(sorted(DATASET_SPECS.keys()))}).")
-    parser.add_argument("--data-dir", "--data-root", dest="data_dir", type=str, default=None,
-                        help="Override dataset root directory.")
-    parser.add_argument("--save-dir", "--save-root", dest="save_dir", type=str, default=None,
-                        help="Directory to store checkpoints and outputs.")
+    """Parse command-line arguments for training.
+
+    All hyperparameters default to values specified in the paper (Section 3.6).
+    """
+    parser = argparse.ArgumentParser(
+        description="Train DINOv2-UNet for polyp segmentation."
+    )
+
+    # Dataset and path arguments
+    parser.add_argument(
+        "--data", "--dataset", "--datasets", dest="datasets", nargs="+", required=True,
+        help=f"One or more dataset keys ({', '.join(sorted(DATASET_SPECS.keys()))}).",
+    )
+    parser.add_argument(
+        "--data-dir", "--data-root", dest="data_dir", type=str, default=None,
+        help="Override dataset root directory.",
+    )
+    parser.add_argument(
+        "--save-dir", "--save-root", dest="save_dir", type=str, default=None,
+        help="Directory to store checkpoints and outputs.",
+    )
+
+    # Model architecture arguments
     parser.add_argument("--img-size", type=int, default=448)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--backbone", type=str, default="vit_base_patch14_dinov2")
     parser.add_argument("--freeze-blocks-until", type=int, default=6)
+    parser.add_argument(
+        "--decoder-dropout", type=float, default=0.2,
+        help="Dropout probability in UNet decoder.",
+    )
+
+    # Training hyperparameters (paper Section 3.6)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--lr-backbone", type=float, default=1e-5)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-epochs", type=int, default=5)
+    parser.add_argument("--grad-clip", type=float, default=1.0,
+                        help="Max gradient norm for clipping.")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--aug-mode", type=str, choices=VALID_AUG_MODES, default="strong",
-                        help="Training augmentation strength. strong=default, weak=flip/rotate only, none=no extra.")
-    parser.add_argument("--decoder-dropout", type=float, default=0.2,
-                        help="Dropout probability in UNet decoder.")
+    parser.add_argument(
+        "--aug-mode", type=str, choices=VALID_AUG_MODES, default="strong",
+        help="Training augmentation strength.",
+    )
+
+    # Inference options
     parser.add_argument("--no-tta", action="store_true",
                         help="Disable Test Time Augmentation (horizontal flip).")
     parser.add_argument("--no-profile", action="store_true",
                         help="Disable model Params/FLOPs/FPS profiling.")
-    
-    # New argument
-    parser.add_argument("--ratio", type=float, default=1.0,
-                        help="Ratio of training data to use (0.0 to 1.0). Default is 1.0 (all data).")
+    parser.add_argument("--no-deep-supervision", action="store_true",
+                        help="Disable deep supervision auxiliary heads.")
 
-    # Ablation Study arguments
-    parser.add_argument("--optimizer-strategy", type=str, default="partial_finetune",
-                        choices=["frozen_encoder", "full_finetune", "partial_finetune"],
-                        help="Finetuning strategy: frozen_encoder, full_finetune, or partial_finetune (default).")
-    parser.add_argument("--pretrained-type", type=str, default="dinov2",
-                        choices=["dinov2", "imagenet_supervised"],
-                        help="Pretrained weights type: dinov2 (default) or imagenet_supervised.")
-    parser.add_argument("--decoder-type", type=str, default="simple",
-                        choices=["simple", "complex"],
-                        help="Decoder type: simple (Streamlined) or complex (Attention Gates).")
-    
+    # Ablation study arguments (paper Section 4.9)
+    parser.add_argument(
+        "--optimizer-strategy", type=str, default="partial_finetune",
+        choices=["frozen_encoder", "full_finetune", "partial_finetune"],
+        help="Fine-tuning strategy (Section 4.9.2).",
+    )
+    parser.add_argument(
+        "--pretrained-type", type=str, default="dinov2",
+        choices=["dinov2", "imagenet_supervised"],
+        help="Pretrained weights type (Section 4.9.1).",
+    )
+    parser.add_argument(
+        "--decoder-type", type=str, default="simple",
+        choices=["simple", "complex"],
+        help="Decoder type: simple (Streamlined) or complex (Attention Gates, Section 4.9.3).",
+    )
+
     # Export options
-    parser.add_argument("--no-export", action="store_true", help="Skip mask export step.")
-    parser.add_argument("--export-splits", nargs="*", default=["test"],
-                        help="Splits to export masks for: train val test or all.")
+    parser.add_argument("--no-export", action="store_true",
+                        help="Skip mask export step.")
+    parser.add_argument(
+        "--export-splits", nargs="*", default=["test"],
+        help="Splits to export masks for: train val test or all.",
+    )
 
     return parser.parse_args()
 
 
 def resolve_split_list(values):
+    """Resolve export split names, expanding 'all' to all three splits."""
     splits = [v.lower() for v in values]
     if len(splits) == 1 and splits[0] == "all":
         return ["train", "val", "test"]
@@ -106,6 +159,7 @@ def resolve_split_list(values):
 
 
 def main():
+    """Main training entry point."""
     args = parse_args()
     datasets_keys = [resolve_dataset_key(d) for d in args.datasets]
     export_splits = resolve_split_list(args.export_splits)
@@ -123,7 +177,8 @@ def main():
 
         spec = DATASET_SPECS[dataset_key]
         if spec.requires_tifffile and tifffile is None:
-            print(f"Skipping {dataset_key}: tifffile required. Install with `pip install tifffile imagecodecs`.")
+            print(f"Skipping {dataset_key}: tifffile required. "
+                  "Install with `pip install tifffile imagecodecs`.")
             continue
 
         # Setup logging
@@ -136,27 +191,19 @@ def main():
         sys.stdout = logger
         sys.stderr = logger
 
-        print(f"\n{'='*40}\nProcessing Dataset: {dataset_key}\n{'='*40}\n")
+        print(f"\n{'=' * 40}\nProcessing Dataset: {dataset_key}\n{'=' * 40}\n")
 
-        # Resolve Data Directory
+        # Resolve data directory
         if args.data_dir:
             if len(datasets_keys) > 1 and spec.default_subdir:
-                 # If passing a root for multiple datasets, append the default subdir
-                 # Assumes args.data_dir is a common root containing dataset subfolders
-                 # UNLESS the user passed specific single path for a single dataset.
-                 # Heuristic: if passed data_dir exists and has images, use it? 
-                 # Simplest logic: if multiple datasets, assume data_dir is ROOT.
-                 cur_data_dir = os.path.join(args.data_dir, spec.default_subdir)
+                cur_data_dir = os.path.join(args.data_dir, spec.default_subdir)
+            elif len(datasets_keys) == 1:
+                cur_data_dir = args.data_dir
             else:
-                 # If single dataset, args.data_dir is likely the direct path
-                 # OR if it's a root without subdirs needed.
-                 # Let's stick to resolve_data_dir logic usually, but override.
-                 # If user provided data_dir, we act like it's the root if we can find default_subdir inside.
-                 # Otherwise we assume it's the dataset dir itself if single dataset.
-                 if len(datasets_keys) == 1:
-                     cur_data_dir = args.data_dir
-                 else:
-                     cur_data_dir = os.path.join(args.data_dir, spec.default_subdir) if spec.default_subdir else args.data_dir
+                cur_data_dir = (
+                    os.path.join(args.data_dir, spec.default_subdir)
+                    if spec.default_subdir else args.data_dir
+                )
         else:
             cur_data_dir = resolve_data_dir(spec, None)
 
@@ -166,19 +213,17 @@ def main():
             sys.stderr = original_stderr
             continue
 
-        # Resolve Save Directory
+        # Resolve save directory
         if args.save_dir:
-             if len(datasets_keys) > 1:
-                 cur_save_dir = os.path.join(args.save_dir, f"dinov2_unet_{dataset_key}")
-             else:
-                 cur_save_dir = args.save_dir
+            if len(datasets_keys) > 1:
+                cur_save_dir = os.path.join(
+                    args.save_dir, f"dinov2_unet_{dataset_key}"
+                )
+            else:
+                cur_save_dir = args.save_dir
         else:
             cur_save_dir = spec.default_save_dir
 
-        # Append ratio to save_dir to avoid overwriting default runs
-        if args.ratio < 1.0:
-            cur_save_dir = f"{cur_save_dir}_ratio{int(args.ratio*100)}"
-        
         cfg = TrainConfig(
             dataset=dataset_key,
             data_dir=cur_data_dir,
@@ -200,10 +245,11 @@ def main():
             decoder_dropout=args.decoder_dropout,
             use_tta=not args.no_tta,
             profile=not args.no_profile,
-            subset_ratio=args.ratio,
             pretrained_type=args.pretrained_type,
             decoder_type=args.decoder_type,
             optimizer_strategy=args.optimizer_strategy,
+            deep_supervision=not args.no_deep_supervision,
+            grad_clip=args.grad_clip,
         )
 
         try:
@@ -240,5 +286,5 @@ def main():
         sys.stderr = original_stderr
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

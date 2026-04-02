@@ -1,10 +1,33 @@
+"""Segmentation metrics for polyp evaluation.
+
+Implements the evaluation metrics described in the paper (Section 4.2):
+- Dice coefficient and IoU (Eq. 17)
+- Mean Absolute Error (MAE, Eq. 18)
+- Weighted F-measure (Fw_beta)
+- Structure measure (S_alpha, Eq. 19)
+- Enhanced alignment measure (E_xi, Eq. 20)
+- Precision, Recall, Accuracy
+"""
+
 from typing import Dict, Tuple
 
 import torch
 
 
 @torch.no_grad()
-def dice_iou_from_logits(logits, targets, thr=0.5, eps=1e-6):
+def dice_iou_from_logits(logits: torch.Tensor, targets: torch.Tensor,
+                         thr: float = 0.5, eps: float = 1e-6):
+    """Compute batch-averaged Dice and IoU from raw logits.
+
+    Args:
+        logits: Raw model output of shape (B, 1, H, W).
+        targets: Binary ground-truth masks of shape (B, 1, H, W).
+        thr: Binarization threshold for predictions.
+        eps: Small constant for numerical stability.
+
+    Returns:
+        Tuple of (mean_dice, mean_iou) as float values.
+    """
     probs = torch.sigmoid(logits)
     preds = (probs > thr).float()
     inter = (preds * targets).sum(dim=(2, 3))
@@ -15,6 +38,7 @@ def dice_iou_from_logits(logits, targets, thr=0.5, eps=1e-6):
 
 
 def _object_score(values: torch.Tensor, eps: float = 1e-6) -> float:
+    """Compute object-level similarity score for S_alpha."""
     if values.numel() == 0:
         return 0.0
     mean_val = values.mean()
@@ -23,6 +47,7 @@ def _object_score(values: torch.Tensor, eps: float = 1e-6) -> float:
 
 
 def _s_object(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
+    """Compute object-level structure similarity (S_o)."""
     fg_mask = gt >= 0.5
     w_fg = fg_mask.float().mean().item()
     w_bg = 1.0 - w_fg
@@ -32,6 +57,7 @@ def _s_object(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
 
 
 def _centroid(gt: torch.Tensor) -> Tuple[int, int]:
+    """Compute the centroid of the ground-truth mask."""
     h, w = gt.shape
     total = gt.sum()
     if total <= 0:
@@ -46,6 +72,7 @@ def _centroid(gt: torch.Tensor) -> Tuple[int, int]:
 
 
 def _ssim(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
+    """Compute structural similarity for a single region."""
     if pred.numel() == 0 or gt.numel() == 0:
         return 0.0
     mean_x = pred.mean()
@@ -62,6 +89,7 @@ def _ssim(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
 
 
 def _s_region(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
+    """Compute region-level structure similarity (S_r)."""
     h, w = gt.shape
     if h == 0 or w == 0:
         return 0.0
@@ -89,7 +117,18 @@ def _s_region(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
     return score
 
 
-def structure_measure_map(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> float:
+def structure_measure_map(pred: torch.Tensor, gt: torch.Tensor,
+                          eps: float = 1e-6) -> float:
+    """Compute structure measure S_alpha for a single prediction-GT pair (Eq. 19).
+
+    Args:
+        pred: Predicted probability map (H, W).
+        gt: Ground-truth binary mask (H, W).
+        eps: Numerical stability constant.
+
+    Returns:
+        S_alpha value in [0, 1].
+    """
     total = gt.sum()
     numel = gt.numel()
     if total <= 0:
@@ -102,7 +141,9 @@ def structure_measure_map(pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-
     return alpha * s_obj + (1 - alpha) * s_reg
 
 
-def _enhanced_alignment(bin_pred: torch.Tensor, gt: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+def _enhanced_alignment(bin_pred: torch.Tensor, gt: torch.Tensor,
+                         eps: float = 1e-6) -> torch.Tensor:
+    """Compute enhanced alignment score for a single threshold."""
     mean_pred = bin_pred.mean()
     mean_gt = gt.mean()
     align = (2 * (bin_pred - mean_pred) * (gt - mean_gt) + eps) / (
@@ -112,7 +153,22 @@ def _enhanced_alignment(bin_pred: torch.Tensor, gt: torch.Tensor, eps: float = 1
     return enhanced.mean()
 
 
-def enhanced_measure_map(pred: torch.Tensor, gt: torch.Tensor, num_steps: int = 41, eps: float = 1e-6) -> Tuple[float, float]:
+def enhanced_measure_map(pred: torch.Tensor, gt: torch.Tensor,
+                          num_steps: int = 41,
+                          eps: float = 1e-6) -> Tuple[float, float]:
+    """Compute enhanced alignment measure E_xi (Eq. 20).
+
+    Returns both mean and max E_xi across multiple thresholds.
+
+    Args:
+        pred: Predicted probability map (H, W).
+        gt: Ground-truth binary mask (H, W).
+        num_steps: Number of threshold steps.
+        eps: Numerical stability constant.
+
+    Returns:
+        Tuple of (mean_E_xi, max_E_xi).
+    """
     total = gt.sum()
     numel = gt.numel()
     if total <= 0:
@@ -131,47 +187,72 @@ def enhanced_measure_map(pred: torch.Tensor, gt: torch.Tensor, num_steps: int = 
 
 
 def compute_segmentation_metrics(
-    logits: torch.Tensor, targets: torch.Tensor, thr: float = 0.5, beta_sq: float = 0.3 ** 2,
-    e_steps: int = 41, eps: float = 1e-6
+    logits: torch.Tensor, targets: torch.Tensor, thr: float = 0.5,
+    beta_sq: float = 0.3 ** 2, e_steps: int = 41, eps: float = 1e-6,
 ) -> Dict[str, float]:
+    """Compute all segmentation evaluation metrics.
+
+    Implements the full evaluation protocol from Section 4.2 of the paper.
+
+    Args:
+        logits: Raw model output of shape (B, C, H, W).
+        targets: Binary ground-truth masks of shape (B, C, H, W).
+        thr: Binarization threshold.
+        beta_sq: Squared beta for weighted F-measure.
+        e_steps: Number of threshold steps for E_xi computation.
+        eps: Numerical stability constant.
+
+    Returns:
+        Dict containing: mDice, mIoU, mae, Fbeta_w, s_alpha, mE, mE_max,
+        precision, recall, accuracy.
+    """
     probs = torch.sigmoid(logits).clamp(0.0, 1.0)
     preds = (probs > thr).float()
     dims = tuple(range(2, targets.ndim))
+
     inter = (preds * targets).sum(dim=dims)
     preds_sum = preds.sum(dim=dims)
     targets_sum = targets.sum(dim=dims)
     union = preds_sum + targets_sum - inter
+
     dice = (2 * inter + eps) / (preds_sum + targets_sum + eps)
     iou = (inter + eps) / (union + eps)
+
     tp = inter
     fp = (preds * (1 - targets)).sum(dim=dims)
     fn = ((1 - preds) * targets).sum(dim=dims)
     tn = ((1 - preds) * (1 - targets)).sum(dim=dims)
+
     precision = (tp + eps) / (tp + fp + eps)
     recall = (tp + eps) / (tp + fn + eps)
     accuracy = (tp + tn + eps) / (tp + fp + fn + tn + eps)
     mae = torch.abs(probs - targets).mean(dim=dims)
+
+    # Weighted F-measure
     tp_w = (probs * targets).sum(dim=dims)
     fp_w = (probs * (1 - targets)).sum(dim=dims)
     fn_w = ((1 - probs) * targets).sum(dim=dims)
     precision_w = (tp_w + eps) / (tp_w + fp_w + eps)
     recall_w = (tp_w + eps) / (tp_w + fn_w + eps)
-    fbeta_w = (1 + beta_sq) * precision_w * recall_w / (beta_sq * precision_w + recall_w + eps)
+    fbeta_w = (1 + beta_sq) * precision_w * recall_w / (
+        beta_sq * precision_w + recall_w + eps
+    )
 
+    # Per-sample structure and alignment measures
     s_scores, e_means, e_maxes = [], [], []
     bsz = probs.size(0)
     for b in range(bsz):
         pred_map = probs[b, 0] if probs.size(1) == 1 else probs[b].mean(dim=0)
         gt_map = targets[b, 0] if targets.size(1) == 1 else targets[b].mean(dim=0)
         s_scores.append(structure_measure_map(pred_map, gt_map, eps))
-        e_mean, e_max = enhanced_measure_map(pred_map, gt_map, num_steps=e_steps, eps=eps)
+        e_mean, e_max = enhanced_measure_map(pred_map, gt_map,
+                                              num_steps=e_steps, eps=eps)
         e_means.append(e_mean)
         e_maxes.append(e_max)
 
     denom = max(len(s_scores), 1)
     metrics = {
         "mDice": dice.mean().item(),
-        "mDic": dice.mean().item(),
         "mIoU": iou.mean().item(),
         "dice": dice.mean().item(),
         "iou": iou.mean().item(),
@@ -185,4 +266,3 @@ def compute_segmentation_metrics(
         "mE_max": float(sum(e_maxes) / denom),
     }
     return metrics
-

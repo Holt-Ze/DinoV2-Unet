@@ -1,3 +1,16 @@
+"""Dataset classes for polyp segmentation benchmarks.
+
+This module provides PyTorch Dataset implementations for four public
+colonoscopy polyp segmentation datasets used in the paper (Section 4.1):
+- **Kvasir-SEG**: 1000 images with pixel-level polyp annotations.
+- **CVC-ClinicDB**: 612 colonoscopy frames with polyp masks.
+- **CVC-ColonDB**: 380 images from colonoscopy sequences.
+- **ETIS-LaribPolypDB**: 196 challenging images with small/flat polyps.
+
+All datasets follow an 80/10/10 train/val/test split with a fixed random seed
+for reproducibility (Section 4.1).
+"""
+
 import os
 import random
 from dataclasses import dataclass
@@ -17,9 +30,24 @@ except ImportError:
 
 
 class KvasirSEG(Dataset):
+    """Kvasir-SEG dataset for polyp segmentation.
+
+    Contains 1000 gastrointestinal polyp images with corresponding
+    segmentation masks. Images are in JPEG/PNG format.
+
+    Args:
+        data_dir: Root directory containing 'images/' and 'masks/' subdirs.
+        split: One of 'train', 'val', or 'test'.
+        img_size: Target image resolution after resizing.
+        mean: Normalization mean (ImageNet default).
+        std: Normalization std (ImageNet default).
+        seed: Random seed for reproducible train/val/test splitting.
+        aug_mode: Augmentation strength ('strong', 'weak', 'none').
+    """
+
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
-                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong", subset_ratio: float = 1.0):
+                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
+                 seed: int = 42, aug_mode: str = "strong"):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "images")
         self.msk_dir = os.path.join(data_dir, "masks")
@@ -28,7 +56,8 @@ class KvasirSEG(Dataset):
         if not os.path.isdir(self.msk_dir):
             raise FileNotFoundError(f"Mask folder not found: {self.msk_dir}")
         exts = {".jpg", ".jpeg", ".png", ".bmp"}
-        names = [f for f in os.listdir(self.img_dir) if os.path.splitext(f)[1].lower() in exts]
+        names = [f for f in os.listdir(self.img_dir)
+                 if os.path.splitext(f)[1].lower() in exts]
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
@@ -37,9 +66,6 @@ class KvasirSEG(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
-            if subset_ratio < 1.0:
-                limit = max(1, int(len(self.names) * subset_ratio))
-                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -51,17 +77,20 @@ class KvasirSEG(Dataset):
         self.aug_mode = _normalize_aug_mode(aug_mode)
         self.transform = self._get_transform()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.names)
 
     def _get_transform(self):
-        return build_polyp_transform(self.split, self.img_size, self.mean, self.std, self.aug_mode)
+        return build_polyp_transform(self.split, self.img_size, self.mean,
+                                     self.std, self.aug_mode)
 
     def _load_pair(self, name):
+        """Load an image-mask pair by filename."""
         img_path = os.path.join(self.img_dir, name)
         stem = os.path.splitext(name)[0]
         candidates = [
-            os.path.join(self.msk_dir, stem + ext) for ext in (".png", ".jpg", ".jpeg", ".bmp")
+            os.path.join(self.msk_dir, stem + ext)
+            for ext in (".png", ".jpg", ".jpeg", ".bmp")
         ]
         for msk_path in candidates:
             if os.path.exists(msk_path):
@@ -83,9 +112,24 @@ class KvasirSEG(Dataset):
 
 
 class CVCClinicDBDataset(Dataset):
+    """CVC-ClinicDB dataset for polyp segmentation.
+
+    Contains 612 frames extracted from colonoscopy videos with corresponding
+    ground-truth masks. Supports both TIFF and standard image formats.
+
+    Args:
+        data_dir: Root directory containing 'Original/' and 'Ground Truth/' subdirs.
+        split: One of 'train', 'val', or 'test'.
+        img_size: Target image resolution after resizing.
+        mean: Normalization mean (ImageNet default).
+        std: Normalization std (ImageNet default).
+        seed: Random seed for reproducible splitting.
+        aug_mode: Augmentation strength ('strong', 'weak', 'none').
+    """
+
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
-                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong", subset_ratio: float = 1.0):
+                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
+                 seed: int = 42, aug_mode: str = "strong"):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "Original")
         self.msk_dir = os.path.join(data_dir, "Ground Truth")
@@ -97,7 +141,8 @@ class CVCClinicDBDataset(Dataset):
             else:
                 raise FileNotFoundError(f"Image folder not found: {self.img_dir}")
         valid_exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
-        names = [f for f in sorted(os.listdir(self.img_dir)) if os.path.splitext(f)[1].lower() in valid_exts]
+        names = [f for f in sorted(os.listdir(self.img_dir))
+                 if os.path.splitext(f)[1].lower() in valid_exts]
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
@@ -106,9 +151,6 @@ class CVCClinicDBDataset(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
-            if subset_ratio < 1.0:
-                limit = max(1, int(len(self.names) * subset_ratio))
-                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -120,23 +162,29 @@ class CVCClinicDBDataset(Dataset):
         self.aug_mode = _normalize_aug_mode(aug_mode)
         self.transform = self._get_transform()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.names)
 
     def _get_transform(self):
-        return build_polyp_transform(self.split, self.img_size, self.mean, self.std, self.aug_mode)
+        return build_polyp_transform(self.split, self.img_size, self.mean,
+                                     self.std, self.aug_mode)
 
     @staticmethod
     def _read_image(path: str, is_mask: bool):
+        """Read an image file, supporting TIFF format."""
         ext = os.path.splitext(path)[1].lower()
         if ext in {".tif", ".tiff"}:
             if tifffile is None:
-                raise RuntimeError("tifffile is required for TIFF files. Install with `pip install tifffile imagecodecs`.")
+                raise RuntimeError(
+                    "tifffile is required for TIFF files. "
+                    "Install with `pip install tifffile imagecodecs`."
+                )
             return tifffile.imread(path)
         mode = "L" if is_mask else "RGB"
         return np.array(Image.open(path).convert(mode))
 
     def _load_pair(self, name):
+        """Load an image-mask pair by filename."""
         img_path = os.path.join(self.img_dir, name)
         msk_path = os.path.join(self.msk_dir, name)
         try:
@@ -167,7 +215,8 @@ class CVCClinicDBDataset(Dataset):
             attempts += 1
         else:
             raise RuntimeError(
-                f"Failed to load {max_attempts} samples in a row from {self.img_dir}. Dataset files may be missing or corrupted."
+                f"Failed to load {max_attempts} samples in a row from "
+                f"{self.img_dir}. Dataset files may be missing or corrupted."
             )
         transformed = self.transform(image=img, mask=msk)
         img = transformed["image"]
@@ -177,9 +226,24 @@ class CVCClinicDBDataset(Dataset):
 
 
 class CVCColonDB(Dataset):
+    """CVC-ColonDB dataset for polyp segmentation.
+
+    Contains 380 colonoscopy images with ground-truth masks. One of the
+    more challenging benchmarks due to low contrast and small polyps.
+
+    Args:
+        data_dir: Root directory containing 'images/' and 'masks/' subdirs.
+        split: One of 'train', 'val', or 'test'.
+        img_size: Target image resolution after resizing.
+        mean: Normalization mean (ImageNet default).
+        std: Normalization std (ImageNet default).
+        seed: Random seed for reproducible splitting.
+        aug_mode: Augmentation strength ('strong', 'weak', 'none').
+    """
+
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
-                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong", subset_ratio: float = 1.0):
+                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
+                 seed: int = 42, aug_mode: str = "strong"):
         super().__init__()
         if os.path.exists(os.path.join(data_dir, "images")):
             self.img_dir = os.path.join(data_dir, "images")
@@ -192,7 +256,8 @@ class CVCColonDB(Dataset):
         if not os.path.isdir(self.msk_dir):
             raise FileNotFoundError(f"Mask folder not found: {self.msk_dir}")
         exts = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp"}
-        names = [f for f in sorted(os.listdir(self.img_dir)) if os.path.splitext(f)[1].lower() in exts]
+        names = [f for f in sorted(os.listdir(self.img_dir))
+                 if os.path.splitext(f)[1].lower() in exts]
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
@@ -201,9 +266,6 @@ class CVCColonDB(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
-            if subset_ratio < 1.0:
-                limit = max(1, int(len(self.names) * subset_ratio))
-                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -215,13 +277,15 @@ class CVCColonDB(Dataset):
         self.aug_mode = _normalize_aug_mode(aug_mode)
         self.transform = self._get_transform()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.names)
 
     def _get_transform(self):
-        return build_polyp_transform(self.split, self.img_size, self.mean, self.std, self.aug_mode)
+        return build_polyp_transform(self.split, self.img_size, self.mean,
+                                     self.std, self.aug_mode)
 
     def _load_pair(self, name):
+        """Load an image-mask pair by filename."""
         img_path = os.path.join(self.img_dir, name)
         msk_path = os.path.join(self.msk_dir, name)
         if not os.path.exists(msk_path):
@@ -246,9 +310,24 @@ class CVCColonDB(Dataset):
 
 
 class ETISLaribDataset(Dataset):
+    """ETIS-LaribPolypDB dataset for polyp segmentation.
+
+    Contains 196 challenging images with small, flat polyps and indistinct
+    boundaries. Used as the most challenging benchmark in the paper.
+
+    Args:
+        data_dir: Root directory containing 'images/' and 'masks/' subdirs.
+        split: One of 'train', 'val', or 'test'.
+        img_size: Target image resolution after resizing.
+        mean: Normalization mean (ImageNet default).
+        std: Normalization std (ImageNet default).
+        seed: Random seed for reproducible splitting.
+        aug_mode: Augmentation strength ('strong', 'weak', 'none').
+    """
+
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
-                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), seed: int = 42,
-                 aug_mode: str = "strong", subset_ratio: float = 1.0):
+                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
+                 seed: int = 42, aug_mode: str = "strong"):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "images")
         self.msk_dir = os.path.join(data_dir, "masks")
@@ -257,7 +336,8 @@ class ETISLaribDataset(Dataset):
         if not os.path.isdir(self.msk_dir):
             raise FileNotFoundError(f"Mask folder not found: {self.msk_dir}")
         exts = {".png"}
-        names = [f for f in os.listdir(self.img_dir) if os.path.splitext(f)[1].lower() in exts]
+        names = [f for f in os.listdir(self.img_dir)
+                 if os.path.splitext(f)[1].lower() in exts]
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
@@ -266,9 +346,6 @@ class ETISLaribDataset(Dataset):
         n_val = int(n * 0.1)
         if split == "train":
             self.names = names[:n_train] or names
-            if subset_ratio < 1.0:
-                limit = max(1, int(len(self.names) * subset_ratio))
-                self.names = self.names[:limit]
         elif split == "val":
             self.names = names[n_train:n_train + n_val] or names
         else:
@@ -280,13 +357,15 @@ class ETISLaribDataset(Dataset):
         self.aug_mode = _normalize_aug_mode(aug_mode)
         self.transform = self._get_transform()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.names)
 
     def _get_transform(self):
-        return build_polyp_transform(self.split, self.img_size, self.mean, self.std, self.aug_mode)
+        return build_polyp_transform(self.split, self.img_size, self.mean,
+                                     self.std, self.aug_mode)
 
     def _load_pair(self, name):
+        """Load an image-mask pair by filename."""
         img_path = os.path.join(self.img_dir, name)
         stem = os.path.splitext(name)[0]
         msk_path = os.path.join(self.msk_dir, stem + ".png")
@@ -308,6 +387,15 @@ class ETISLaribDataset(Dataset):
 
 @dataclass(frozen=True)
 class DatasetSpec:
+    """Specification for a supported dataset.
+
+    Args:
+        cls: Dataset class to instantiate.
+        default_subdir: Subdirectory name under the data root.
+        default_save_dir: Default output directory for checkpoints.
+        requires_tifffile: Whether the dataset requires tifffile for I/O.
+    """
+
     cls: Type[Dataset]
     default_subdir: Optional[str]
     default_save_dir: str
@@ -315,10 +403,22 @@ class DatasetSpec:
 
 
 DATASET_SPECS: Dict[str, DatasetSpec] = {
-    "kvasir": DatasetSpec(KvasirSEG, "Kvasir-SEG", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_kvasir")),
-    "clinicdb": DatasetSpec(CVCClinicDBDataset, "CVC-ClinicDB", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_clinicdb"), True),
-    "colondb": DatasetSpec(CVCColonDB, "CVC-ColonDB", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_colondb")),
-    "etis": DatasetSpec(ETISLaribDataset, "ETIS", os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_etis")),
+    "kvasir": DatasetSpec(
+        KvasirSEG, "Kvasir-SEG",
+        os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_kvasir"),
+    ),
+    "clinicdb": DatasetSpec(
+        CVCClinicDBDataset, "CVC-ClinicDB",
+        os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_clinicdb"), True,
+    ),
+    "colondb": DatasetSpec(
+        CVCColonDB, "CVC-ColonDB",
+        os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_colondb"),
+    ),
+    "etis": DatasetSpec(
+        ETISLaribDataset, "ETIS",
+        os.path.join(DEFAULT_RUNS_ROOT, "dinov2_unet_etis"),
+    ),
 }
 
 DATASET_ALIASES: Dict[str, str] = {
@@ -336,24 +436,46 @@ DATASET_SUBDIR_FALLBACKS: Dict[str, Tuple[str, ...]] = {
 
 
 def resolve_dataset_key(name: str) -> str:
+    """Resolve a dataset name or alias to a canonical key.
+
+    Args:
+        name: User-provided dataset name (case-insensitive).
+
+    Returns:
+        Canonical dataset key (e.g., 'kvasir', 'clinicdb').
+    """
     key = name.lower()
     return DATASET_ALIASES.get(key, key)
 
 
 def resolve_data_dir(spec: DatasetSpec, override: Optional[str]) -> str:
+    """Resolve the dataset directory path.
+
+    Checks the override path first, then falls back to default locations
+    under DATA_ROOT with known subdirectory names.
+
+    Args:
+        spec: Dataset specification.
+        override: User-provided path override (if any).
+
+    Returns:
+        Absolute path to the dataset directory.
+    """
     if override:
         return os.path.abspath(override)
     if spec.default_subdir is None:
-        raise ValueError("No default data directory defined; please provide --data-dir.")
+        raise ValueError(
+            "No default data directory defined; please provide --data-dir."
+        )
     primary = os.path.abspath(os.path.join(DEFAULT_DATA_ROOT, spec.default_subdir))
     if os.path.isdir(primary):
         return primary
-    # Try known alternative folder names.
     for key, fallbacks in DATASET_SUBDIR_FALLBACKS.items():
         if spec is DATASET_SPECS.get(key):
             for name in fallbacks:
-                candidate = os.path.abspath(os.path.join(DEFAULT_DATA_ROOT, name))
+                candidate = os.path.abspath(
+                    os.path.join(DEFAULT_DATA_ROOT, name)
+                )
                 if os.path.isdir(candidate):
                     return candidate
     return primary
-

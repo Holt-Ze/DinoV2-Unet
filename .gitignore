@@ -1,7 +1,47 @@
-data/
-runs/
+# ---- Python ----
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# ---- Virtual Environment ----
+.venv/
+venv/
+dino/
+
+# ---- Data & Outputs ----
+data/
+data.zip
+*.zip
+runs/
 log/
-/comparison_results
+comparison_results/
 results/
+
+# ---- Checkpoints & Weights ----
+*.pt
+*.pth
+*.onnx
+
+# ---- IDE & Editor ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---- Experiment Tracking ----
+wandb/
+mlruns/
+tensorboard/
+
+# ---- Misc ----
+*.log
+*.tmp
+_paper_text.txt
