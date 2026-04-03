@@ -83,7 +83,7 @@ def export_dataset_masks(
         if isinstance(state, dict):
             state = {
                 k: v for k, v in state.items()
-                if not (k.endswith("total_ops") or k.endswith("total_params"))
+                if not (k.endswith("total_ops") or k.endswith("total_params") or k.startswith("aux_heads"))
             }
         missing, unexpected = model.load_state_dict(state, strict=False)
         if unexpected:
