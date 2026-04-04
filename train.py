@@ -280,21 +280,24 @@ def main():
         if not args.no_export:
             export_dir = os.path.join(cur_save_dir, "pred_masks")
             try:
-                export_dataset_masks(
-                    dataset_key=dataset_key,
-                    data_dir=cur_data_dir,
-                    save_dir=export_dir,
-                    backbone=args.backbone,
-                    out_indices=cfg.out_indices,
-                    img_size=cfg.img_size,
-                    freeze_blocks_until=args.freeze_blocks_until,
-                    decoder_dropout=args.decoder_dropout,
-                    num_workers=args.num_workers,
-                    splits=export_splits,
-                    checkpoint_path=os.path.join(cur_save_dir, "best.pt"),
-                    device=None,
-                    seed=args.seed,
-                )
+                if dataset_key.startswith("joint_"):
+                    print(f"Skipping mask export for joint dataset {dataset_key}.")
+                else:
+                    export_dataset_masks(
+                        dataset_key=dataset_key,
+                        data_dir=cur_data_dir,
+                        save_dir=export_dir,
+                        backbone=args.backbone,
+                        out_indices=cfg.out_indices,
+                        img_size=cfg.img_size,
+                        freeze_blocks_until=args.freeze_blocks_until,
+                        decoder_dropout=args.decoder_dropout,
+                        num_workers=args.num_workers,
+                        splits=export_splits,
+                        checkpoint_path=os.path.join(cur_save_dir, "best.pt"),
+                        device=None,
+                        seed=args.seed,
+                    )
                 print(f"Saved masks to {export_dir}")
             except Exception as e:
                 print(f"Error exporting masks for {dataset_key}: {e}")

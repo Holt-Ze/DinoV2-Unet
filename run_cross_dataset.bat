@@ -36,14 +36,14 @@ REM ============================================================================
 echo ^>^>^> Evaluating on ETIS-LaribPolypDB (Zero-shot generalization)...
 python test.py ^
     --dataset etis ^
-    --data-dir ./data ^
+    --data-dir ./data/ETIS ^
     --checkpoint %CHECKPOINT% ^
     --export-masks
 
 echo ^>^>^> Evaluating on CVC-ColonDB (Zero-shot generalization)...
 python test.py ^
     --dataset colondb ^
-    --data-dir ./data ^
+    --data-dir ./data/CVC-ColonDB ^
     --checkpoint %CHECKPOINT% ^
     --export-masks
 
