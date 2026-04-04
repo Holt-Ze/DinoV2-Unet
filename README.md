@@ -10,6 +10,8 @@
 - **Streamlined U-shaped decoder** with progressive multi-scale fusion
 - **Deep supervision** with auxiliary heads for improved gradient flow
 - **Transfer-oriented training**: differential learning rates, cosine warm-up, gradient clipping
+- **Experimental rigor**: N-Fold Cross Validation and Joint Training support
+- **Zero-shot generalization**: Built-in cross-dataset evaluation pipeline
 - **53.92 FPS** on a single GPU — exceeding real-time clinical requirements
 - **State-of-the-art** on four public benchmarks: Kvasir-SEG, CVC-ClinicDB, CVC-ColonDB, ETIS-LaribPolypDB
 
@@ -82,6 +84,11 @@ Train on all four datasets sequentially:
 python train.py --dataset kvasir clinicdb colondb etis --data-dir ./data --save-dir runs
 ```
 
+Joint training on multiple datasets with 5-Fold Cross Validation (e.g. fold 0):
+```bash
+python train.py --dataset kvasir clinicdb --data-dir ./data --joint-train --fold 0 --num-folds 5
+```
+
 ### Key Training Arguments
 
 | Argument | Default | Description |
@@ -102,6 +109,18 @@ python train.py --dataset kvasir clinicdb colondb etis --data-dir ./data --save-
 - Test visualizations: `<save_dir>/vis_test/`
 - Predicted masks: `<save_dir>/pred_masks/`
 - Training logs: `log/<dataset>/`
+
+## Cross-Dataset Evaluation Pipeline
+
+To evaluate the zero-shot generalization capabilities, we provide automated pipeline scripts. The pipeline trains a joint model on Kvasir-SEG and CVC-ClinicDB (using 5-fold CV) and automatically evaluates it on unseen datasets like ETIS and CVC-ColonDB:
+
+```bash
+# Windows
+run_cross_dataset.bat
+
+# Linux / macOS
+bash run_cross_dataset.sh
+```
 
 ## Evaluation
 
