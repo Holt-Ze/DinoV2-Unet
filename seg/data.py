@@ -16,6 +16,30 @@ import random
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Type
 
+def _do_split(names: list, split: str, fold_idx: int, num_folds: int) -> list:
+    n = len(names)
+    if num_folds <= 1:
+        n_train = int(n * 0.8)
+        n_val = int(n * 0.1)
+        if split == "train": return names[:n_train] or names
+        if split == "val": return names[n_train:n_train + n_val] or names
+        return names[n_train + n_val:] or names
+
+    chunk_size = n // num_folds
+    test_start = fold_idx * chunk_size
+    test_end = test_start + chunk_size if fold_idx < num_folds - 1 else n
+
+    test_names = names[test_start:test_end]
+    remain_names = names[:test_start] + names[test_end:]
+
+    val_size = max(1, int(n * 0.1))
+    val_names = remain_names[:val_size]
+    train_names = remain_names[val_size:]
+
+    if split == "train": return train_names or names
+    if split == "val": return val_names or names
+    return test_names or names
+
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
@@ -47,7 +71,8 @@ class KvasirSEG(Dataset):
 
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
-                 seed: int = 42, aug_mode: str = "strong"):
+                 seed: int = 42, aug_mode: str = "strong", 
+                 fold_idx: int = 0, num_folds: int = 1):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "images")
         self.msk_dir = os.path.join(data_dir, "masks")
@@ -61,15 +86,7 @@ class KvasirSEG(Dataset):
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
-        n = len(names)
-        n_train = int(n * 0.8)
-        n_val = int(n * 0.1)
-        if split == "train":
-            self.names = names[:n_train] or names
-        elif split == "val":
-            self.names = names[n_train:n_train + n_val] or names
-        else:
-            self.names = names[n_train + n_val:] or names
+        self.names = _do_split(names, split, fold_idx, num_folds)
         self.split = split
         self.img_size = img_size
         self.mean = mean
@@ -129,7 +146,8 @@ class CVCClinicDBDataset(Dataset):
 
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
-                 seed: int = 42, aug_mode: str = "strong"):
+                 seed: int = 42, aug_mode: str = "strong",
+                 fold_idx: int = 0, num_folds: int = 1):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "Original")
         self.msk_dir = os.path.join(data_dir, "Ground Truth")
@@ -146,15 +164,7 @@ class CVCClinicDBDataset(Dataset):
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
-        n = len(names)
-        n_train = int(n * 0.8)
-        n_val = int(n * 0.1)
-        if split == "train":
-            self.names = names[:n_train] or names
-        elif split == "val":
-            self.names = names[n_train:n_train + n_val] or names
-        else:
-            self.names = names[n_train + n_val:] or names
+        self.names = _do_split(names, split, fold_idx, num_folds)
         self.split = split
         self.img_size = img_size
         self.mean = mean
@@ -243,7 +253,8 @@ class CVCColonDB(Dataset):
 
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
-                 seed: int = 42, aug_mode: str = "strong"):
+                 seed: int = 42, aug_mode: str = "strong",
+                 fold_idx: int = 0, num_folds: int = 1):
         super().__init__()
         if os.path.exists(os.path.join(data_dir, "images")):
             self.img_dir = os.path.join(data_dir, "images")
@@ -261,15 +272,7 @@ class CVCColonDB(Dataset):
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
-        n = len(names)
-        n_train = int(n * 0.8)
-        n_val = int(n * 0.1)
-        if split == "train":
-            self.names = names[:n_train] or names
-        elif split == "val":
-            self.names = names[n_train:n_train + n_val] or names
-        else:
-            self.names = names[n_train + n_val:] or names
+        self.names = _do_split(names, split, fold_idx, num_folds)
         self.split = split
         self.img_size = img_size
         self.mean = mean
@@ -327,7 +330,8 @@ class ETISLaribDataset(Dataset):
 
     def __init__(self, data_dir: str, split: str = "train", img_size: int = 448,
                  mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
-                 seed: int = 42, aug_mode: str = "strong"):
+                 seed: int = 42, aug_mode: str = "strong",
+                 fold_idx: int = 0, num_folds: int = 1):
         super().__init__()
         self.img_dir = os.path.join(data_dir, "images")
         self.msk_dir = os.path.join(data_dir, "masks")
@@ -341,15 +345,7 @@ class ETISLaribDataset(Dataset):
         if not names:
             raise RuntimeError(f"No images found in {self.img_dir}")
         random.Random(seed).shuffle(names)
-        n = len(names)
-        n_train = int(n * 0.8)
-        n_val = int(n * 0.1)
-        if split == "train":
-            self.names = names[:n_train] or names
-        elif split == "val":
-            self.names = names[n_train:n_train + n_val] or names
-        else:
-            self.names = names[n_train + n_val:] or names
+        self.names = _do_split(names, split, fold_idx, num_folds)
         self.split = split
         self.img_size = img_size
         self.mean = mean

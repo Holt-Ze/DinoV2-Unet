@@ -114,6 +114,11 @@ def parse_args():
         help="Training augmentation strength.",
     )
 
+    # Experimental Design options
+    parser.add_argument("--fold", type=int, default=0, help="Fold index for K-Fold CV (0 to num-folds - 1).")
+    parser.add_argument("--num-folds", type=int, default=1, help="Total number of CV folds (default 1 means old 80/10/10 split).")
+    parser.add_argument("--joint-train", action="store_true", help="Combine all specified datasets for joint training.")
+
     # Inference options
     parser.add_argument("--no-tta", action="store_true",
                         help="Disable Test Time Augmentation (horizontal flip).")
@@ -170,6 +175,7 @@ def main():
     log_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "log")
     os.makedirs(log_root, exist_ok=True)
 
+    valid_datasets = []
     for dataset_key in datasets_keys:
         if dataset_key not in DATASET_SPECS:
             print(f"Skipping unsupported dataset: {dataset_key}")
@@ -181,8 +187,39 @@ def main():
                   "Install with `pip install tifffile imagecodecs`.")
             continue
 
+        if args.data_dir:
+            cur_data_dir = (
+                os.path.join(args.data_dir, spec.default_subdir)
+                if spec.default_subdir else args.data_dir
+            )
+        else:
+            cur_data_dir = resolve_data_dir(spec, None)
+
+        if not os.path.isdir(cur_data_dir):
+            print(f"[Error] Dataset directory not found: {cur_data_dir}")
+            continue
+            
+        valid_datasets.append((dataset_key, spec, cur_data_dir))
+
+    if not valid_datasets:
+        print("No valid datasets to process.")
+        return
+
+    runs_to_execute = []
+    if args.joint_train and len(valid_datasets) > 1:
+        joint_key = "joint_" + "_".join([k for k, _, _ in valid_datasets])
+        joint_specs = [(s.cls, d) for _, s, d in valid_datasets]
+        runs_to_execute.append((joint_key, valid_datasets[0][1], valid_datasets[0][2], joint_specs))
+    else:
+        for k, s, d in valid_datasets:
+            runs_to_execute.append((k, s, d, None))
+
+    for dataset_key, spec, cur_data_dir, joint_specs in runs_to_execute:
         # Setup logging
         dataset_log_dir = os.path.join(log_root, dataset_key)
+        if args.num_folds > 1:
+            dataset_log_dir = os.path.join(dataset_log_dir, f"fold_{args.fold}")
+            
         os.makedirs(dataset_log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file = os.path.join(dataset_log_dir, f"{timestamp}.log")
@@ -191,38 +228,16 @@ def main():
         sys.stdout = logger
         sys.stderr = logger
 
-        print(f"\n{'=' * 40}\nProcessing Dataset: {dataset_key}\n{'=' * 40}\n")
-
-        # Resolve data directory
-        if args.data_dir:
-            if len(datasets_keys) > 1 and spec.default_subdir:
-                cur_data_dir = os.path.join(args.data_dir, spec.default_subdir)
-            elif len(datasets_keys) == 1:
-                cur_data_dir = args.data_dir
-            else:
-                cur_data_dir = (
-                    os.path.join(args.data_dir, spec.default_subdir)
-                    if spec.default_subdir else args.data_dir
-                )
-        else:
-            cur_data_dir = resolve_data_dir(spec, None)
-
-        if not os.path.isdir(cur_data_dir):
-            print(f"[Error] Dataset directory not found: {cur_data_dir}")
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            continue
+        print(f"\n{'=' * 40}\nProcessing: {dataset_key}\nFold: {args.fold}/{args.num_folds}\n{'=' * 40}\n")
 
         # Resolve save directory
         if args.save_dir:
-            if len(datasets_keys) > 1:
-                cur_save_dir = os.path.join(
-                    args.save_dir, f"dinov2_unet_{dataset_key}"
-                )
-            else:
-                cur_save_dir = args.save_dir
+            cur_save_dir = os.path.join(args.save_dir, f"dinov2_unet_{dataset_key}")
         else:
-            cur_save_dir = spec.default_save_dir
+            cur_save_dir = os.path.join("runs", f"dinov2_unet_{dataset_key}")
+            
+        if args.num_folds > 1:
+            cur_save_dir = os.path.join(cur_save_dir, f"fold_{args.fold}")
 
         cfg = TrainConfig(
             dataset=dataset_key,
@@ -250,6 +265,9 @@ def main():
             optimizer_strategy=args.optimizer_strategy,
             deep_supervision=not args.no_deep_supervision,
             grad_clip=args.grad_clip,
+            fold=args.fold,
+            num_folds=args.num_folds,
+            joint_train_specs=joint_specs,
         )
 
         try:

@@ -141,6 +141,9 @@ class TrainConfig:
     optimizer_strategy: str = "partial_finetune"
     deep_supervision: bool = True
     grad_clip: float = 1.0
+    fold: int = 0
+    num_folds: int = 1
+    joint_train_specs: Optional[list] = None
 
 
 def get_optimizer(model: DinoV2UNet, strategy: str, cfg: TrainConfig):
@@ -435,15 +438,32 @@ def run_training(cfg: TrainConfig, dataset_key: str,
         )
         print(profile_msg)
 
-    train_ds = dataset_cls(
-        cfg.data_dir, "train", cfg.img_size, seed=cfg.seed, aug_mode=cfg.aug_mode,
-    )
-    val_ds = dataset_cls(
-        cfg.data_dir, "val", cfg.img_size, seed=cfg.seed, aug_mode="none",
-    )
-    test_ds = dataset_cls(
-        cfg.data_dir, "test", cfg.img_size, seed=cfg.seed, aug_mode="none",
-    )
+    if cfg.joint_train_specs:
+        train_dss, val_dss, test_dss = [], [], []
+        import torch.utils.data as data_utils
+        mean, std = None, None
+        for (d_cls, d_dir) in cfg.joint_train_specs:
+            t = d_cls(d_dir, "train", cfg.img_size, seed=cfg.seed, aug_mode=cfg.aug_mode, fold_idx=cfg.fold, num_folds=cfg.num_folds)
+            v = d_cls(d_dir, "val", cfg.img_size, seed=cfg.seed, aug_mode="none", fold_idx=cfg.fold, num_folds=cfg.num_folds)
+            te = d_cls(d_dir, "test", cfg.img_size, seed=cfg.seed, aug_mode="none", fold_idx=cfg.fold, num_folds=cfg.num_folds)
+            train_dss.append(t)
+            val_dss.append(v)
+            test_dss.append(te)
+            if mean is None: mean, std = t.mean, t.std
+        train_ds = data_utils.ConcatDataset(train_dss)
+        val_ds = data_utils.ConcatDataset(val_dss)
+        test_ds = data_utils.ConcatDataset(test_dss)
+        train_ds.mean, train_ds.std = mean, std
+    else:
+        train_ds = dataset_cls(
+            cfg.data_dir, "train", cfg.img_size, seed=cfg.seed, aug_mode=cfg.aug_mode, fold_idx=cfg.fold, num_folds=cfg.num_folds
+        )
+        val_ds = dataset_cls(
+            cfg.data_dir, "val", cfg.img_size, seed=cfg.seed, aug_mode="none", fold_idx=cfg.fold, num_folds=cfg.num_folds
+        )
+        test_ds = dataset_cls(
+            cfg.data_dir, "test", cfg.img_size, seed=cfg.seed, aug_mode="none", fold_idx=cfg.fold, num_folds=cfg.num_folds
+        )
 
     drop_last = len(train_ds) >= cfg.batch_size
     train_loader = DataLoader(
