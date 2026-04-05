@@ -1,132 +1,118 @@
-# DINOv2-UNet 一键脚本工具集
+# DINOv2-UNet Scripts
 
-这个文件夹包含所有一键实验脚本，用于快速运行各种实验管道。
+All-in-one experiment automation for DINOv2-UNet colonoscopy polyp segmentation.
 
-## 🚀 快速开始
+## Quick Start
 
-### 1. 最简单的方式 - 运行总启动菜单
+1. **Double-click** `START.bat` in Windows Explorer
+2. **Choose** your experiment mode (1-4)
+3. **Wait** for completion - results will be saved automatically
 
-**双击：`START.bat`**
+## Experiment Modes
 
-这会打开一个交互式菜单，让你选择要运行的操作。
+### 1. Quick Pipeline (~5 min)
+- Training with metrics tracking
+- Output: Model + metrics JSON
 
-## 📋 脚本文件说明
-
-| 文件 | 说明 | 执行时间 |
-|------|------|--------|
-| **START.bat** ⭐ | 总启动菜单，集合所有功能 | 1 分钟 |
-| **run_quick_pipeline.bat** | 快速模式：训练+简化消融+报告 | 20-30分钟 |
-| **run_full_pipeline.bat** | 完整模式(推荐)：训练+完整消融+失败分析+报告 | 2-4小时 |
-| **run_advanced_pipeline.bat** | 高级模式：联合训练+交叉验证+跨域评估 | 6-10小时 |
-| **run_pipeline.bat** | 管道选择器：选择要运行的管道 | - |
-| **run_tools.bat** | 辅助工具：环境检查、数据验证、日志清理 | 1分钟 |
-| **BATCH_SCRIPTS_GUIDE.md** | 详细使用指南 | - |
-
-## 🎯 如何使用
-
-### 方式1：菜单启动（推荐）
 ```bash
-# 双击这个文件
+# Equivalent command:
+python train.py --dataset kvasir --data-dir ./data/Kvasir-SEG --track-metrics
+```
+
+### 2. Full Pipeline (~30 min)
+- Training + metrics + gradient tracking + failure analysis
+- Ablation studies (2 axes: freeze_blocks_until, lr_ratio)
+- Automatic visualizations & report generation
+
+```bash
+# Runs:
+python train.py ... --track-metrics --track-gradients --save-failure-analysis
+python run_ablation_studies.py --axes freeze_blocks_until lr_ratio ...
+python generate_experiment_report.py ...
+```
+
+### 3. Advanced Pipeline (~60 min)
+- Complete analysis: training + extensive ablations + domain analysis
+- Ablation axes: freeze_blocks_until, lr_ratio, aug_mode, decoder_type
+- Cross-domain transfer prediction
+- Publication-ready HTML reports
+
+### 4. Manual Mode
+Pick individual operations:
+- Train with metrics tracking
+- Run custom ablation studies
+- Generate failure analysis
+- Generate reports
+- Run combined tools
+
+## Output Locations
+
+| Output | Location |
+|--------|----------|
+| Best model | `runs/dinov2_unet_*/best.pt` |
+| Training metrics | `runs/*/metrics_history.json` |
+| Failure analysis | `runs/*/failure_montages/` |
+| Ablation results | `ablation_results/summary.csv` |
+| Reports | `reports/experiment_report.html` |
+
+## File Structure
+
+```
+scripts/
+├── START.bat                    ← Start here!
+├── run_quick_pipeline.bat       (Training only)
+├── run_full_pipeline.bat        (Training + ablations)
+├── run_advanced_pipeline.bat    (Everything)
+├── run_pipeline.bat             (Legacy)
+├── run_tools.bat                (Custom combinations)
+├── README.md                    (This file)
+└── BATCH_SCRIPTS_GUIDE.md       (Technical details)
+```
+
+## Notes
+
+- All scripts require:
+  - `data/Kvasir-SEG/` with images and masks
+  - Python 3.10+ with PyTorch installed
+  - Virtual environment activated
+
+- Results are saved to project root:
+  - `runs/` — training outputs
+  - `ablation_results/` — hyperparameter studies
+  - `reports/` — HTML reports
+
+- Each script is standalone and can be:
+  - Double-clicked directly
+  - Called from command line
+
+Example:
+```bash
+cd scripts
 START.bat
 ```
-然后在菜单中选择 1-9 进行各种操作。
 
-### 方式2：直接运行单个脚本
+## Troubleshooting
+
+**"Python not found"** — Activate your virtual environment first:
 ```bash
-# 快速模式
-run_quick_pipeline.bat
-
-# 完整模式
-run_full_pipeline.bat
-
-# 高级模式
-run_advanced_pipeline.bat
-
-# 工具箱
-run_tools.bat
+dino\Scripts\activate
 ```
 
-### 方式3：命令行运行
-```bash
-cd scripts/
-START.bat
-```
+**"Encoding error"** — Ensure prompts in START.bat are pure ASCII (fixed in latest version)
 
-## 📌 重要提示
+**Script stops early** — Check error messages and logs in `log/` directory
 
-1. **必须在项目根目录运行** — 脚本使用相对路径 `../data/`, `../runs/` 等
-   - ✓ 正确：在 `d:\DinoV2-Unet\` 文件夹中双击 `scripts\START.bat`
-   - ✗ 错误：在 `d:\DinoV2-Unet\scripts\` 文件夹中双击 `START.bat`
+## Advanced: Custom Commands
 
-2. **数据集位置** — 脚本期望数据集在项目根目录的 `data/` 文件夹中
-   ```
-   d:\DinoV2-Unet\
-   ├── scripts/          ← 脚本都在这里
-   ├── data/             ← 数据集在这里
-   ├── seg/
-   ├── train.py
-   └── ...
-   ```
+Open `START.bat` in Notepad to modify parameters:
+- `set DATASET=kvasir` → Change dataset
+- `set BATCH_SIZE=8` → Adjust batch size
+- `set EPOCHS=80` → Training duration
+- `set NUM_SEEDS=2` → Ablation study repetitions
 
-3. **输出位置** — 结果会保存到项目根目录（与脚本同级）
-   ```
-   d:\DinoV2-Unet\
-   ├── runs/             ← 训练结果
-   ├── ablation_results/ ← 消融结果
-   └── reports/          ← 实验报告
-   ```
+## Support
 
-## 🔧 前置要求
-
-- Python 3.10+ 和 PyTorch 2.0+ 已安装
-- 数据集已下载到 `data/` 目录
-- 足够的GPU显存 (建议 8GB+)
-- 充足的磁盘空间 (50GB+ 用于完整模式)
-
-## 📖 查看详细文档
-
-- **使用指南**：打开 `BATCH_SCRIPTS_GUIDE.md`
-- **项目说明**：回到项目根目录打开 `README.md`
-
-## 💡 常见问题
-
-**Q: 脚本一直无法找到数据？**
-- A: 确保从项目根目录运行脚本，不是从 scripts 文件夹内。
-
-**Q: 如何自定义参数？**
-- A: 用记事本打开相应的 .bat 文件，修改顶部的参数，保存后运行。
-
-**Q: 脚本中断了怎么办？**
-- A: 脚本不支持断点续跑。重新运行会覆盖之前的结果。
-
-**Q: 如何查看结果？**
-- A:
-  - 训练曲线：`runs/*/training_curves.png`
-  - 消融结果：用 Excel 打开 `ablation_results/summary.csv`
-  - 完整报告：用浏览器打开 `reports/experiment_report.html`
-
-## 🎓 推荐工作流
-
-1. **快速验证**
-   ```bash
-   START.bat  # 选择 1: 快速管道
-   ```
-   用来检查环境和数据是否正常（20-30分钟）
-
-2. **完整实验**（推荐用于论文）
-   ```bash
-   START.bat  # 选择 2: 完整管道
-   ```
-   进行全面的实验分析（2-4小时）
-
-3. **最终评估**
-   ```bash
-   START.bat  # 选择 3: 高级管道
-   ```
-   多数据集联合训练和跨域泛化评估（6-10小时）
-
----
-
-祝你实验顺利! 🎉
-
-有问题？打开 `BATCH_SCRIPTS_GUIDE.md` 查看完整文档。
+For issues with:
+- **Training**: See `log/` directory for detailed error messages
+- **Data loading**: Verify dataset structure in `data/`
+- **Visualization**: Requires matplotlib (in requirements.txt)
