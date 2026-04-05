@@ -35,6 +35,7 @@ results/
 *.swo
 *~
 .DS_Store
+.claude/
 
 # ---- Experiment Tracking ----
 wandb/

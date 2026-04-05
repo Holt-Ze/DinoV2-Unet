@@ -213,7 +213,19 @@ def main():
                   "Install with `pip install tifffile imagecodecs`.")
             continue
 
-        cur_data_dir = resolve_data_dir(spec, args.data_dir)
+        if args.data_dir:
+            candidate = os.path.abspath(args.data_dir)
+            if os.path.isdir(candidate) and spec.default_subdir:
+                # Check if subdir needs appending (e.g. --data-dir ./data)
+                sub = os.path.join(candidate, spec.default_subdir)
+                if os.path.isdir(sub):
+                    cur_data_dir = sub
+                else:
+                    cur_data_dir = candidate
+            else:
+                cur_data_dir = candidate
+        else:
+            cur_data_dir = resolve_data_dir(spec, None)
 
         if not os.path.isdir(cur_data_dir):
             print(f"[Error] Dataset directory not found: {cur_data_dir}")
