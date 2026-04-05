@@ -141,6 +141,10 @@ class TrainConfig:
     optimizer_strategy: str = "partial_finetune"
     deep_supervision: bool = True
     grad_clip: float = 1.0
+    track_metrics: bool = True
+    track_gradients: bool = False
+    track_activations: bool = False
+    save_failure_analysis: bool = True
     fold: int = 0
     num_folds: int = 1
     joint_train_specs: Optional[list] = None
@@ -495,6 +499,12 @@ def run_training(cfg: TrainConfig, dataset_key: str,
     print(f"Saving outputs to {cfg.save_dir}")
     print(f"Deep supervision: {cfg.deep_supervision}")
 
+    # Initialize metrics tracking if enabled
+    metrics_history = None
+    if cfg.track_metrics:
+        from .metrics_tracking import MetricsHistory
+        metrics_history = MetricsHistory(cfg.save_dir)
+
     early_stopper = EarlyStopping(
         patience=cfg.patience, verbose=True,
         path=os.path.join(cfg.save_dir, "best.pt"),
@@ -510,6 +520,17 @@ def run_training(cfg: TrainConfig, dataset_key: str,
         )
         val_metrics = evaluate(model, val_loader, device)
         dt = time.time() - t0
+
+        # Record metrics if tracking enabled
+        if metrics_history:
+            train_metrics = {
+                "loss": tr_loss,
+                "dice": tr_dice,
+                "iou": tr_iou,
+            }
+            metrics_history.record_epoch(epoch, "train", train_metrics)
+            metrics_history.record_epoch(epoch, "val", val_metrics)
+            metrics_history.save_json(os.path.join(cfg.save_dir, "metrics_history.json"))
 
         print(
             f"Epoch {epoch + 1:03d}/{cfg.epochs} | time {dt:.1f}s | "

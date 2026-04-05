@@ -152,6 +152,32 @@ def parse_args():
         help="Splits to export masks for: train val test or all.",
     )
 
+    # Analysis and tracking arguments
+    parser.add_argument(
+        "--track-metrics", action="store_true", default=True, dest="track_metrics",
+        help="Enable metrics tracking and JSON export (default: True).",
+    )
+    parser.add_argument(
+        "--no-track-metrics", action="store_false", dest="track_metrics",
+        help="Disable metrics tracking.",
+    )
+    parser.add_argument(
+        "--track-gradients", action="store_true", default=False, dest="track_gradients",
+        help="Enable gradient flow tracking (default: False, computationally expensive).",
+    )
+    parser.add_argument(
+        "--track-activations", action="store_true", default=False, dest="track_activations",
+        help="Enable activation statistics tracking (default: False).",
+    )
+    parser.add_argument(
+        "--save-failure-analysis", action="store_true", default=True, dest="save_failure_analysis",
+        help="Save failure analysis (hard examples, confidence) after training (default: True).",
+    )
+    parser.add_argument(
+        "--no-failure-analysis", action="store_false", dest="save_failure_analysis",
+        help="Disable failure analysis.",
+    )
+
     return parser.parse_args()
 
 
@@ -265,6 +291,10 @@ def main():
             optimizer_strategy=args.optimizer_strategy,
             deep_supervision=not args.no_deep_supervision,
             grad_clip=args.grad_clip,
+            track_metrics=args.track_metrics,
+            track_gradients=args.track_gradients,
+            track_activations=args.track_activations,
+            save_failure_analysis=args.save_failure_analysis,
             fold=args.fold,
             num_folds=args.num_folds,
             joint_train_specs=joint_specs,

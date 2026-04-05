@@ -89,7 +89,7 @@ Joint training on multiple datasets with 5-Fold Cross Validation (e.g. fold 0):
 python train.py --dataset kvasir clinicdb --data-dir ./data --joint-train --fold 0 --num-folds 5
 ```
 
-### Key Training Arguments
+#### Key Training Arguments
 
 | Argument | Default | Description |
 |---|---|---|
@@ -102,6 +102,9 @@ python train.py --dataset kvasir clinicdb --data-dir ./data --joint-train --fold
 | `--aug-mode` | strong | Augmentation: `strong`, `weak`, `none` |
 | `--grad-clip` | 1.0 | Gradient clipping max norm |
 | `--patience` | 10 | Early stopping patience |
+| `--track-metrics` | False | Enable metrics history tracking (saves metrics_history.json per epoch) |
+| `--track-gradients` | False | Enable gradient flow analysis (logs activation values) |
+| `--save-failure-analysis` | False | Post-hoc hard example mining and semantic categorization |
 
 ### Outputs
 
@@ -173,6 +176,87 @@ python train.py --dataset kvasir --decoder-type simple
 python train.py --dataset kvasir --decoder-type complex
 ```
 
+## Advanced Analysis & Ablation Experiments
+
+Beyond the base training pipeline, we provide a comprehensive experimental analysis infrastructure to support publication-level research:
+
+### 1. Metrics Tracking – `--track-metrics`
+
+Automatically logs training metrics per epoch (loss, Dice, IoU, MAE, etc.) into a JSON file:
+
+```bash
+python train.py --dataset kvasir --data-dir ./data/Kvasir-SEG \
+    --track-metrics --save-dir runs/kvasir_with_metrics
+```
+
+Output: `runs/kvasir_with_metrics/metrics_history.json` — directly importable into pandas/Excel for statistical analysis.
+
+### 2. Gradient Flow Analysis – `--track-gradients`
+
+Enable gradient and activation value tracking during training to diagnose training dynamics:
+
+```bash
+python train.py --dataset kvasir --data-dir ./data/Kvasir-SEG \
+    --track-gradients --save-dir runs/kvasir_gradient_analysis
+```
+
+### 3. Hard Example Mining & Failure Analysis – `--save-failure-analysis`
+
+Post-hoc analysis identifying difficult samples and categorizing failure modes:
+
+```bash
+python train.py --dataset kvasir --data-dir ./data/Kvasir-SEG \
+    --save-failure-analysis --save-dir runs/kvasir_failure_analysis
+```
+
+Outputs:
+- `failure_analysis.json` — Confidence calibration curves and hard example rankings
+- `failure_montages/` — Visual montages of failure modes (5 semantic categories)
+
+### 4. Systematic Ablation Studies
+
+Run multi-dimensional hyperparameter sweeps across 6 axes (freeze_blocks_until, lr_ratio, aug_mode, decoder_type, grad_clip, batch_size). Automatically aggregates results to CSV + heatmaps.
+
+```bash
+python run_ablation_studies.py --dataset kvasir \
+    --axes freeze_blocks_until lr_ratio \
+    --freeze-blocks-until 0 3 6 9 12 \
+    --lr-ratio 0.001 0.01 0.1 1.0 \
+    --num-seeds 2 --save-dir ablation_results
+```
+
+Outputs:
+- `ablation_results/summary.csv` — Tabular results for external analysis
+- `ablation_results/heatmaps/` — Publication-quality heatmaps
+
+### 5. Domain Analysis & Zero-Shot Transfer Prediction
+
+Analyze feature distribution shifts across datasets and predict zero-shot transfer performance:
+
+```bash
+python analyze_domains.py --model-dir runs/kvasir/best.pt \
+    --source-dataset kvasir --target-datasets clinicdb colondb etis \
+    --output-dir domain_analysis
+```
+
+Outputs:
+- Wasserstein distance matrices
+- t-SNE feature visualizations
+- Transfer performance predictions
+
+### 6. Automatic Report Generation
+
+Generate publication-ready Markdown + HTML reports summarizing all experiments:
+
+```bash
+python generate_experiment_report.py --results-dir runs/ \
+    --ablation-dir ablation_results/ \
+    --domain-dir domain_analysis/ \
+    --output-dir reports/
+```
+
+Output: `reports/experiment_report.html` — Complete summary with tables and inline plots.
+
 ## Pseudocode
 
 For detailed algorithmic descriptions of the model architecture, deep supervision, training pipeline, and cross-dataset evaluation protocol, see **[PSEUDOCODE.md](PSEUDOCODE.md)**.
@@ -181,7 +265,7 @@ For detailed algorithmic descriptions of the model architecture, deep supervisio
 
 ```
 DinoV2-Unet/
-├── train.py              # Training entry point
+├── train.py              # Training entry point (with --track-metrics, --track-gradients, --save-failure-analysis)
 ├── test.py               # Evaluation entry point
 ├── requirements.txt      # Python dependencies
 ├── seg/                  # Core package
@@ -191,11 +275,20 @@ DinoV2-Unet/
 │   ├── training.py       # Training loop, optimizer, scheduler, evaluation
 │   ├── losses.py         # BCE + Dice hybrid loss + deep supervision loss
 │   ├── metrics.py        # Dice, IoU, MAE, Fw_β, S_α, E_ξ, Precision, Recall
+│   ├── metrics_tracking.py # MetricsHistory, GradientTracker, ActivationTracker (NEW)
 │   ├── inference.py      # Mask export utilities
 │   ├── transforms.py     # Data augmentation pipelines
 │   ├── profiling.py      # Params / FLOPs / FPS benchmarking
 │   ├── paths.py          # Default path configuration
 │   └── utils.py          # Reproducibility utilities
+├── analysis/             # Experimental analysis modules (NEW)
+│   ├── __init__.py
+│   ├── visualization.py        # TrainingVisualizer, AblationVisualizer, DomainVisualizer
+│   ├── failure_analysis.py     # Hard example mining, semantic categorization
+│   └── domain_analysis.py      # Feature distribution, Wasserstein gap, zero-shot prediction
+├── run_ablation_studies.py     # Multi-dimensional hyperparameter sweeps (NEW)
+├── generate_experiment_report.py # Markdown + HTML report generation (NEW)
+├── PSEUDOCODE.md               # Detailed algorithmic descriptions
 └── data/                 # Dataset directory (not tracked)
 ```
 
