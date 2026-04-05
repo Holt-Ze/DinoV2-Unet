@@ -97,7 +97,7 @@ class AblationScheduler:
             List of command-line argument strings.
         """
         args = [
-            "python", "train.py",
+            sys.executable, "train.py",
             "--dataset", base_args.dataset,
             "--data-dir", base_args.data_dir,
             "--save-dir", base_args.save_dir,
