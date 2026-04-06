@@ -177,6 +177,8 @@ def main():
             freeze_blocks_until=args.freeze_blocks_until,
             decoder_dropout=args.decoder_dropout,
             num_workers=args.num_workers,
+            pretrained_type=args.pretrained_type,
+            decoder_type=args.decoder_type,
             splits=["test"],
             checkpoint_path=args.checkpoint,
             device=device,

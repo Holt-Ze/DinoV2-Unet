@@ -1,3 +1,12 @@
+Python: 3.10+
+
+Recommended environment variables:
+MPLCONFIGDIR=./.cache/matplotlib
+ALBUMENTATIONS_DISABLE_VERSION_CHECK=1
+NO_ALBUMENTATIONS_UPDATE=1
+ALBUMENTATIONS_OFFLINE=1
+
+Core dependencies (mirrors requirements.txt):
 torch>=2.0.0
 torchvision>=0.15.0
 timm>=0.9.0

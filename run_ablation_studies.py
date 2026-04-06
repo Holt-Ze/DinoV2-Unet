@@ -22,13 +22,18 @@ import os
 import sys
 import json
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
 from itertools import product
 
 import pandas as pd
 import numpy as np
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "matplotlib"),
+)
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 
 
 class AblationScheduler:
@@ -85,8 +90,12 @@ class AblationScheduler:
 
         return configs
 
-    def _config_to_args(self, config: Dict[str, Any],
-                       base_args: argparse.Namespace) -> List[str]:
+    def _config_to_args(
+        self,
+        config: Dict[str, Any],
+        base_args: argparse.Namespace,
+        save_dir_override: str = None,
+    ) -> List[str]:
         """Convert a config dict to train.py command-line arguments.
 
         Args:
@@ -96,15 +105,21 @@ class AblationScheduler:
         Returns:
             List of command-line argument strings.
         """
+        save_dir = save_dir_override or base_args.save_dir
         args = [
             sys.executable, "train.py",
             "--dataset", base_args.dataset,
             "--data-dir", base_args.data_dir,
-            "--save-dir", base_args.save_dir,
+            "--save-dir", save_dir,
             "--batch-size", str(base_args.batch_size),
             "--epochs", str(base_args.epochs),
             "--num-workers", str(base_args.num_workers),
         ]
+
+        if getattr(base_args, "max_train_batches", None) is not None:
+            args.extend(["--max-train-batches", str(base_args.max_train_batches)])
+        if getattr(base_args, "max_eval_batches", None) is not None:
+            args.extend(["--max-eval-batches", str(base_args.max_eval_batches)])
 
         # Add ablation-specific arguments
         if "freeze_blocks_until" in config:
@@ -118,6 +133,9 @@ class AblationScheduler:
 
         if "grad_clip" in config:
             args.extend(["--grad-clip", str(config["grad_clip"])])
+
+        if "aux_weight" in config:
+            args.extend(["--aux-weight-scale", str(config["aux_weight"])])
 
         # Handle lr_ratio: compute lr and lr_backbone
         if "lr_ratio" in config:
@@ -190,7 +208,12 @@ def run_ablation_studies(args: argparse.Namespace):
             # Prepare arguments
 
             base_args = args
-            cmd = scheduler._config_to_args(config, base_args)
+            run_save_dir = os.path.join(
+                args.save_dir, "ablation_runs", f"run_{run_num:04d}"
+            )
+            cmd = scheduler._config_to_args(
+                config, base_args, save_dir_override=run_save_dir
+            )
 
             # Add seed
             cmd.extend(["--seed", str(42 + seed_idx)])
@@ -213,7 +236,7 @@ def run_ablation_studies(args: argparse.Namespace):
 
                 # Parse metrics from metrics_history.json
                 save_dir = os.path.join(
-                    args.save_dir, f"dinov2_unet_{args.dataset}"
+                    run_save_dir, f"dinov2_unet_{args.dataset}"
                 )
                 metrics_path = os.path.join(save_dir, "metrics_history.json")
 
@@ -240,7 +263,7 @@ def run_ablation_studies(args: argparse.Namespace):
                     result_entry.update(config)
                     results.append(result_entry)
 
-                    print(f"✓ Completed. mDice={best_mdice:.4f}, mIoU={best_miou:.4f}")
+                    print(f"[ok] Completed. mDice={best_mdice:.4f}, mIoU={best_miou:.4f}")
                 else:
                     print(f"Warning: metrics_history.json not found at {metrics_path}")
                     failed_runs.append((config, seed_idx))
@@ -257,7 +280,7 @@ def run_ablation_studies(args: argparse.Namespace):
         results_df = pd.DataFrame(results)
         results_csv = os.path.join(args.save_results, "summary.csv")
         results_df.to_csv(results_csv, index=False)
-        print(f"\n✓ Saved results to {results_csv}")
+        print(f"\n[ok] Saved results to {results_csv}")
 
         # Print summary statistics
         print("\n" + "=" * 60)
@@ -290,7 +313,7 @@ def run_ablation_studies(args: argparse.Namespace):
                 print("Note: Install matplotlib + sklearn to generate heatmap plots.")
 
     else:
-        print("\n✗ No results to save. Check logs above for errors.")
+        print("\n[warn] No results to save. Check logs above for errors.")
 
 
 def main():
@@ -350,6 +373,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--max-train-batches", type=int, default=None)
+    parser.add_argument("--max-eval-batches", type=int, default=None)
     parser.add_argument("--track-metrics", action="store_true", default=True)
 
     # Output

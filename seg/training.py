@@ -12,6 +12,7 @@ the paper (Section 3.6), including:
 import math
 import os
 import time
+import json
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -145,6 +146,9 @@ class TrainConfig:
     track_gradients: bool = False
     track_activations: bool = False
     save_failure_analysis: bool = True
+    aux_weight_scale: float = 1.0
+    max_train_batches: Optional[int] = None
+    max_eval_batches: Optional[int] = None
     fold: int = 0
     num_folds: int = 1
     joint_train_specs: Optional[list] = None
@@ -242,7 +246,8 @@ def build_scheduler(optimizer, epochs: int, steps_per_epoch: int,
 
 
 def train_one_epoch(model, loader, optim, scheduler, scaler, loss_fn, device,
-                    grad_clip: float = 1.0):
+                    grad_clip: float = 1.0,
+                    max_batches: Optional[int] = None):
     """Run one training epoch.
 
     Args:
@@ -261,7 +266,9 @@ def train_one_epoch(model, loader, optim, scheduler, scaler, loss_fn, device,
     model.train()
     running_loss, running_dice, running_iou, iters = 0.0, 0.0, 0.0, 0
 
-    for imgs, msks, _ in loader:
+    for batch_idx, (imgs, msks, _) in enumerate(loader):
+        if max_batches is not None and batch_idx >= max_batches:
+            break
         imgs, msks = imgs.to(device, non_blocking=True), msks.to(device, non_blocking=True)
         optim.zero_grad(set_to_none=True)
 
@@ -299,7 +306,8 @@ def train_one_epoch(model, loader, optim, scheduler, scaler, loss_fn, device,
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, use_tta: bool = False):
+def evaluate(model, loader, device, use_tta: bool = False,
+             max_batches: Optional[int] = None):
     """Evaluate the model on a dataset split.
 
     Computes all segmentation metrics defined in the paper (Section 4.2):
@@ -320,7 +328,9 @@ def evaluate(model, loader, device, use_tta: bool = False):
     total_loss = 0.0
     total_samples = 0
 
-    for imgs, msks, _ in loader:
+    for batch_idx, (imgs, msks, _) in enumerate(loader):
+        if max_batches is not None and batch_idx >= max_batches:
+            break
         imgs, msks = imgs.to(device), msks.to(device)
 
         # Get main logits (inference mode: no aux heads)
@@ -490,20 +500,31 @@ def run_training(cfg: TrainConfig, dataset_key: str,
     )
 
     # Deep supervision loss (paper Eq. 10)
+    aux_weights = [0.4, 0.3, 0.2]
+    aux_weights = [w * cfg.aux_weight_scale for w in aux_weights]
     loss_fn = DeepSupervisionLoss(
         base_loss=ComboLoss(0.5, 0.5),
-        aux_weights=[0.4, 0.3, 0.2],
+        aux_weights=aux_weights,
     )
 
     print(f"Using dataset '{dataset_key}' from {cfg.data_dir}")
     print(f"Saving outputs to {cfg.save_dir}")
     print(f"Deep supervision: {cfg.deep_supervision}")
 
-    # Initialize metrics tracking if enabled
+    # Initialize tracking infrastructure
     metrics_history = None
-    if cfg.track_metrics:
+    if cfg.track_metrics or cfg.track_gradients or cfg.track_activations:
         from .metrics_tracking import MetricsHistory
         metrics_history = MetricsHistory(cfg.save_dir)
+
+    gradient_tracker = None
+    activation_tracker = None
+    if cfg.track_gradients or cfg.track_activations:
+        from .metrics_tracking import GradientTracker, ActivationTracker
+        if cfg.track_gradients:
+            gradient_tracker = GradientTracker(model)
+        if cfg.track_activations:
+            activation_tracker = ActivationTracker(model)
 
     early_stopper = EarlyStopping(
         patience=cfg.patience, verbose=True,
@@ -517,12 +538,15 @@ def run_training(cfg: TrainConfig, dataset_key: str,
         tr_loss, tr_dice, tr_iou = train_one_epoch(
             model, train_loader, optim, scheduler, scaler, loss_fn, device,
             grad_clip=cfg.grad_clip,
+            max_batches=cfg.max_train_batches,
         )
-        val_metrics = evaluate(model, val_loader, device)
+        val_metrics = evaluate(
+            model, val_loader, device, max_batches=cfg.max_eval_batches
+        )
         dt = time.time() - t0
 
-        # Record metrics if tracking enabled
-        if metrics_history:
+        # Record metrics if tracking enabled.
+        if metrics_history and cfg.track_metrics:
             train_metrics = {
                 "loss": tr_loss,
                 "dice": tr_dice,
@@ -530,6 +554,20 @@ def run_training(cfg: TrainConfig, dataset_key: str,
             }
             metrics_history.record_epoch(epoch, "train", train_metrics)
             metrics_history.record_epoch(epoch, "val", val_metrics)
+        if metrics_history and gradient_tracker is not None:
+            grad_stats = gradient_tracker.capture_grads()
+            metrics_history.record_gradients(epoch, grad_stats)
+        if metrics_history and activation_tracker is not None:
+            try:
+                act_batch = next(iter(val_loader))
+                act_imgs = act_batch[0].to(device, non_blocking=True)
+                model.eval()
+                _ = model(act_imgs[: min(2, act_imgs.size(0))])
+                act_stats = activation_tracker.capture_activations()
+                metrics_history.record_activations(epoch, act_stats)
+            except StopIteration:
+                pass
+        if metrics_history:
             metrics_history.save_json(os.path.join(cfg.save_dir, "metrics_history.json"))
 
         print(
@@ -557,7 +595,13 @@ def run_training(cfg: TrainConfig, dataset_key: str,
     ckpt = torch.load(os.path.join(cfg.save_dir, "best.pt"), map_location="cpu")
     model.load_state_dict(ckpt["model"])
 
-    test_metrics = evaluate(model, test_loader, device, use_tta=cfg.use_tta)
+    test_metrics = evaluate(
+        model,
+        test_loader,
+        device,
+        use_tta=cfg.use_tta,
+        max_batches=cfg.max_eval_batches,
+    )
     print(
         f"Test with {'TTA' if cfg.use_tta else 'no TTA'} | "
         f"loss {test_metrics['loss']:.4f} mdice {test_metrics['mDice']:.4f} "
@@ -572,6 +616,59 @@ def run_training(cfg: TrainConfig, dataset_key: str,
         model, test_loader, device, os.path.join(cfg.save_dir, "vis_test"),
         train_ds.mean, train_ds.std, max_batches=4,
     )
+
+    if cfg.save_failure_analysis:
+        try:
+            from analysis.failure_analysis import FailureAnalyzer, FailureVisualizer
+
+            analyzer = FailureAnalyzer(model, test_ds, device=device)
+            hard_examples = analyzer.identify_hard_examples(
+                metric="mDice",
+                percentile=10,
+                batch_size=max(1, cfg.batch_size),
+            )
+            categories = analyzer.categorize_failures(hard_examples)
+            confidences, accuracies = analyzer.confidence_analysis(
+                batch_size=max(1, cfg.batch_size)
+            )
+
+            summary = {
+                "num_hard_examples": len(hard_examples),
+                "category_counts": {
+                    name: len(items) for name, items in categories.items()
+                },
+                "hard_examples": [],
+            }
+            for item in hard_examples:
+                metric_value = item.get("mDice", item.get("mIoU", item.get("mae", 0.0)))
+                summary["hard_examples"].append(
+                    {
+                        "idx": int(item.get("idx", -1)),
+                        "image_name": str(item.get("image_name", "")),
+                        "metric": float(metric_value),
+                        "confidence": float(item.get("confidence", 0.0)),
+                    }
+                )
+
+            failure_json = os.path.join(cfg.save_dir, "failure_analysis.json")
+            with open(failure_json, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+
+            FailureVisualizer.plot_confidence_distribution(
+                confidences,
+                accuracies,
+                os.path.join(cfg.save_dir, "failure_confidence.png"),
+            )
+            FailureVisualizer.save_failure_montages(
+                dataset=test_ds,
+                hard_examples=hard_examples,
+                category_dict=categories,
+                save_dir=os.path.join(cfg.save_dir, "failure_montages"),
+                max_per_category=10,
+            )
+            print(f"Saved failure analysis to {failure_json}")
+        except Exception as exc:
+            print(f"[warn] Failure analysis skipped: {exc}")
 
     return {
         "best_val": best_val_metrics or {},

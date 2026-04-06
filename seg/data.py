@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Type
 
 def _do_split(names: list, split: str, fold_idx: int, num_folds: int) -> list:
+    if split not in {"train", "val", "test"}:
+        raise ValueError(f"Unsupported split '{split}'. Expected train/val/test.")
     n = len(names)
     if num_folds <= 1:
         n_train = int(n * 0.8)
@@ -24,6 +26,11 @@ def _do_split(names: list, split: str, fold_idx: int, num_folds: int) -> list:
         if split == "train": return names[:n_train] or names
         if split == "val": return names[n_train:n_train + n_val] or names
         return names[n_train + n_val:] or names
+
+    if fold_idx < 0 or fold_idx >= num_folds:
+        raise ValueError(
+            f"fold_idx={fold_idx} out of range for num_folds={num_folds}."
+        )
 
     chunk_size = n // num_folds
     test_start = fold_idx * chunk_size

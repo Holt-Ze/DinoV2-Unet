@@ -26,6 +26,8 @@ def export_dataset_masks(
     freeze_blocks_until: int,
     decoder_dropout: float,
     num_workers: int,
+    pretrained_type: str = "dinov2",
+    decoder_type: str = "simple",
     splits: Iterable[str] = ("test",),
     checkpoint_path: Optional[str] = None,
     threshold: float = 0.5,
@@ -48,6 +50,8 @@ def export_dataset_masks(
         freeze_blocks_until: Number of frozen encoder blocks.
         decoder_dropout: Decoder dropout probability.
         num_workers: DataLoader worker processes.
+        pretrained_type: Pretrained weight type used during training.
+        decoder_type: Decoder type used during training.
         splits: Dataset splits to export ('train', 'val', 'test').
         checkpoint_path: Path to the model checkpoint file.
         threshold: Binarization threshold for predictions.
@@ -66,10 +70,14 @@ def export_dataset_masks(
     model = DinoV2UNet(
         backbone=backbone,
         out_indices=out_indices,
-        pretrained=True,
+        # Avoid loading external pretrained weights during export;
+        # checkpoint loading below provides the actual trained weights.
+        pretrained=False,
         freeze_blocks_until=freeze_blocks_until,
         num_classes=1,
         decoder_dropout=decoder_dropout,
+        pretrained_type=pretrained_type,
+        decoder_type=decoder_type,
         deep_supervision=False,  # No aux heads needed for inference
     ).to(device)
 

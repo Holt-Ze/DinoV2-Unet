@@ -18,6 +18,12 @@ import json
 import pandas as pd
 import numpy as np
 
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "matplotlib"),
+)
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
+
 
 class ExperimentReporter:
     """Generate comprehensive experiment reports."""
@@ -90,7 +96,7 @@ class ExperimentReporter:
         with open(output_path, "w") as f:
             f.writelines(sections)
 
-        print(f"✓ Saved markdown report: {output_path}")
+        print(f"[ok] Saved markdown report: {output_path}")
 
     def generate_csv_tables(self, output_dir: str) -> None:
         """Export results as CSV tables for external use.
@@ -109,7 +115,7 @@ class ExperimentReporter:
                 os.path.join(output_dir, "ablation_results.csv"),
                 index=False
             )
-            print(f"✓ Saved: {output_dir}/ablation_results.csv")
+            print(f"[ok] Saved: {output_dir}/ablation_results.csv")
 
     def _summarize_baseline(self) -> Dict[str, Dict]:
         """Extract baseline results from metrics_history.json files.
@@ -131,11 +137,18 @@ class ExperimentReporter:
                 with open(metrics_file) as f:
                     data = json.load(f)
 
-                # Get best validation metrics
+                # Get best validation metrics by composite score.
                 best_metrics = {}
+                best_score = -float("inf")
                 for epoch, epoch_data in data.get("metrics", {}).items():
                     if "val" in epoch_data:
-                        best_metrics = epoch_data["val"]
+                        val_metrics = epoch_data["val"]
+                        mdice = float(val_metrics.get("mDice", 0.0))
+                        miou = float(val_metrics.get("mIoU", 0.0))
+                        score = (mdice + miou) / 2.0
+                        if score > best_score:
+                            best_score = score
+                            best_metrics = val_metrics
 
                 if best_metrics:
                     dataset_name = dataset_dir.name.replace("dinov2_unet_", "")
@@ -170,9 +183,13 @@ class ExperimentReporter:
             summary_lines.append("### Summary Statistics\n\n")
             summary_lines.append(f"- Total configurations tested: {len(df)}\n")
             summary_lines.append(f"- Best mDice: {df['mDice'].max():.4f}\n")
-            summary_lines.append(f"- Mean mDice: {df['mDice'].mean():.4f} ± {df['mDice'].std():.4f}\n")
+            summary_lines.append(
+                f"- Mean mDice: {df['mDice'].mean():.4f} +/- {df['mDice'].std():.4f}\n"
+            )
             summary_lines.append(f"- Best mIoU: {df['mIoU'].max():.4f}\n")
-            summary_lines.append(f"- Mean mIoU: {df['mIoU'].mean():.4f} ± {df['mIoU'].std():.4f}\n\n")
+            summary_lines.append(
+                f"- Mean mIoU: {df['mIoU'].mean():.4f} +/- {df['mIoU'].std():.4f}\n\n"
+            )
 
             return "".join(summary_lines)
 
@@ -297,7 +314,7 @@ class HTMLReporter:
         with open(output_path, "w") as f:
             f.write(html_template)
 
-        print(f"✓ Saved HTML report: {output_path}")
+        print(f"[ok] Saved HTML report: {output_path}")
 
 
 def main():
@@ -343,7 +360,7 @@ def main():
     # Export CSV tables
     reporter.generate_csv_tables(args.output_dir)
 
-    print(f"\n✓ Report generation complete. Results saved to {args.output_dir}/")
+    print(f"\n[ok] Report generation complete. Results saved to {args.output_dir}/")
 
 
 if __name__ == "__main__":

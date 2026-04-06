@@ -40,6 +40,11 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["ALBUMENTATIONS_DISABLE_VERSION_CHECK"] = "1"
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 os.environ["ALBUMENTATIONS_OFFLINE"] = "1"
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache", "matplotlib"),
+)
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 
 
 class Logger:
@@ -105,7 +110,19 @@ def parse_args():
     parser.add_argument("--warmup-epochs", type=int, default=5)
     parser.add_argument("--grad-clip", type=float, default=1.0,
                         help="Max gradient norm for clipping.")
+    parser.add_argument(
+        "--aux-weight-scale", type=float, default=1.0,
+        help="Scale factor for deep supervision auxiliary losses.",
+    )
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument(
+        "--max-train-batches", type=int, default=None,
+        help="Cap number of training batches per epoch (for smoke validation).",
+    )
+    parser.add_argument(
+        "--max-eval-batches", type=int, default=None,
+        help="Cap number of validation/test batches (for smoke validation).",
+    )
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--patience", type=int, default=10)
     parser.add_argument("--seed", type=int, default=42)
@@ -186,6 +203,12 @@ def resolve_split_list(values):
     splits = [v.lower() for v in values]
     if len(splits) == 1 and splits[0] == "all":
         return ["train", "val", "test"]
+    valid = {"train", "val", "test"}
+    invalid = [s for s in splits if s not in valid]
+    if invalid:
+        raise ValueError(
+            f"Invalid export split(s): {invalid}. Allowed: {sorted(valid)} or ['all']."
+        )
     return splits
 
 
@@ -301,6 +324,9 @@ def main():
             track_gradients=args.track_gradients,
             track_activations=args.track_activations,
             save_failure_analysis=args.save_failure_analysis,
+            aux_weight_scale=args.aux_weight_scale,
+            max_train_batches=args.max_train_batches,
+            max_eval_batches=args.max_eval_batches,
             fold=args.fold,
             num_folds=args.num_folds,
             joint_train_specs=joint_specs,
@@ -329,6 +355,8 @@ def main():
                         freeze_blocks_until=args.freeze_blocks_until,
                         decoder_dropout=args.decoder_dropout,
                         num_workers=args.num_workers,
+                        pretrained_type=args.pretrained_type,
+                        decoder_type=args.decoder_type,
                         splits=export_splits,
                         checkpoint_path=os.path.join(cur_save_dir, "best.pt"),
                         device=None,

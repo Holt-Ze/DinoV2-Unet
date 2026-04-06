@@ -133,15 +133,23 @@ class FailureAnalyzer:
             else:
                 gt = np.array(msks)
 
-            img_np = imgs.numpy().transpose(1, 2, 0)  # CHW -> HWC
+            img_np = imgs.numpy().transpose(1, 2, 0)  # CHW -> HWC (normalized)
+            mean = np.array(
+                getattr(self.dataset, "mean", (0.485, 0.456, 0.406)), dtype=np.float32
+            ).reshape(1, 1, 3)
+            std = np.array(
+                getattr(self.dataset, "std", (0.229, 0.224, 0.225)), dtype=np.float32
+            ).reshape(1, 1, 3)
+            img_denorm = (img_np * std + mean) * 255.0
+            img_denorm = np.clip(img_denorm, 0, 255).astype(np.uint8)
 
             # Compute features
             area_ratio = gt.mean()
-            im_hsv = cv2.cvtColor((img_np * 255).astype(np.uint8), cv2.COLOR_RGB2HSV)
+            im_hsv = cv2.cvtColor(img_denorm, cv2.COLOR_RGB2HSV)
             saturation = im_hsv[:, :, 1].astype(float).mean() / 255.0
             laplacian = cv2.Laplacian((gt * 255).astype(np.uint8), cv2.CV_64F)
             gradient = np.abs(laplacian).mean()
-            contrast = img_np.std()
+            contrast = img_denorm.std()
 
             # Categorize
             category = "other"
@@ -243,9 +251,12 @@ class FailureVisualizer:
 
                 # Denormalize image
                 if isinstance(imgs, torch.Tensor):
-                    # Standard ImageNet normalization
-                    mean = np.array([0.485, 0.456, 0.406])
-                    std = np.array([0.229, 0.224, 0.225])
+                    mean = np.array(
+                        getattr(dataset, "mean", (0.485, 0.456, 0.406))
+                    )
+                    std = np.array(
+                        getattr(dataset, "std", (0.229, 0.224, 0.225))
+                    )
                     img_denorm = imgs.numpy().transpose(1, 2, 0)
                     img_denorm = (img_denorm * std + mean) * 255
                     img_denorm = np.clip(img_denorm, 0, 255).astype(np.uint8)

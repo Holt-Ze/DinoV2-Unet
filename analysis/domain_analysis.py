@@ -12,8 +12,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from scipy.spatial.distance import wasserstein_distance
-from scipy.stats import entropy
+from scipy.stats import wasserstein_distance
 
 
 class DomainAnalyzer:
@@ -27,16 +26,26 @@ class DomainAnalyzer:
 
     def _register_hooks(self):
         """Register hooks to capture intermediate features."""
-        # Hook into encoder blocks
-        if hasattr(self.model, 'encoder'):
-            encoder = self.model.encoder
-            if hasattr(encoder, 'blocks'):
-                # Hook the last block
-                def hook_fn(module, input, output):
-                    # output is (B, N, D)
-                    self.activations['features'] = output.detach()
+        # Hook into encoder blocks.
+        # DinoV2UNet uses `model.encoder.model.blocks`; keep a fallback for other layouts.
+        if not hasattr(self.model, "encoder"):
+            return
 
-                encoder.blocks[-1].register_forward_hook(hook_fn)
+        encoder = self.model.encoder
+        blocks = None
+        if hasattr(encoder, "model") and hasattr(encoder.model, "blocks"):
+            blocks = encoder.model.blocks
+        elif hasattr(encoder, "blocks"):
+            blocks = encoder.blocks
+
+        if not blocks:
+            return
+
+        def hook_fn(module, input, output):
+            # output is expected to be (B, N, D)
+            self.activations["features"] = output.detach()
+
+        blocks[-1].register_forward_hook(hook_fn)
 
     def extract_intermediate_features(self, loader: DataLoader,
                                      layer_idx: int = 11) -> np.ndarray:
@@ -90,14 +99,10 @@ class DomainAnalyzer:
                 feats1 = features_dict[name1].reshape(len(features_dict[name1]), -1)
                 feats2 = features_dict[name2].reshape(len(features_dict[name2]), -1)
 
-                # Flatten and compute Wasserstein distance
-                feats1_flat = feats1.flatten()
-                feats2_flat = feats2.flatten()
-
                 try:
                     # Use first dimension for efficiency
                     wasserstein = wasserstein_distance(feats1[:, 0], feats2[:, 0])
-                except Exception as e:
+                except Exception:
                     wasserstein = np.nan
 
                 # Compute MMD (simplified)

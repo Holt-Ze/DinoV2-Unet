@@ -21,6 +21,8 @@
 - PyTorch ≥ 2.0 with CUDA support
 - timm, albumentations, Pillow, numpy
 - tifffile + imagecodecs (for TIFF-format datasets)
+- pandas + scipy + opencv-python (analysis modules)
+- matplotlib + scikit-learn + markdown (visualization/report generation)
 
 ### Installation
 
@@ -45,6 +47,14 @@ Or with pip:
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 ```
+
+If Matplotlib cannot write to your home directory on Windows, set:
+```bash
+# PowerShell
+$env:MPLCONFIGDIR = ".\\.cache\\matplotlib"
+```
+
+Environment notes are also documented in `environment.txt`.
 
 ## Dataset Preparation
 
@@ -102,9 +112,12 @@ python train.py --dataset kvasir clinicdb --data-dir ./data --joint-train --fold
 | `--aug-mode` | strong | Augmentation: `strong`, `weak`, `none` |
 | `--grad-clip` | 1.0 | Gradient clipping max norm |
 | `--patience` | 10 | Early stopping patience |
-| `--track-metrics` | False | Enable metrics history tracking (saves metrics_history.json per epoch) |
+| `--track-metrics` | True | Enable metrics history tracking (saves metrics_history.json per epoch) |
 | `--track-gradients` | False | Enable gradient flow analysis (logs activation values) |
-| `--save-failure-analysis` | False | Post-hoc hard example mining and semantic categorization |
+| `--save-failure-analysis` | True | Post-hoc hard example mining and semantic categorization |
+| `--aux-weight-scale` | 1.0 | Scale factor for deep supervision auxiliary losses |
+| `--max-train-batches` | None | Cap train batches per epoch (smoke validation) |
+| `--max-eval-batches` | None | Cap val/test batches (smoke validation) |
 
 ### Outputs
 
@@ -219,10 +232,11 @@ Run multi-dimensional hyperparameter sweeps across 6 axes (freeze_blocks_until, 
 
 ```bash
 python run_ablation_studies.py --dataset kvasir \
+    --data-dir ./data/Kvasir-SEG \
     --axes freeze_blocks_until lr_ratio \
     --freeze-blocks-until 0 3 6 9 12 \
     --lr-ratio 0.001 0.01 0.1 1.0 \
-    --num-seeds 2 --save-dir ablation_results
+    --num-seeds 2 --save-results ablation_results
 ```
 
 Outputs:
@@ -251,7 +265,6 @@ Generate publication-ready Markdown + HTML reports summarizing all experiments:
 ```bash
 python generate_experiment_report.py --results-dir runs/ \
     --ablation-dir ablation_results/ \
-    --domain-dir domain_analysis/ \
     --output-dir reports/
 ```
 
@@ -268,6 +281,7 @@ DinoV2-Unet/
 ├── train.py              # Training entry point (with --track-metrics, --track-gradients, --save-failure-analysis)
 ├── test.py               # Evaluation entry point
 ├── requirements.txt      # Python dependencies
+├── environment.txt       # Environment variables + dependency notes
 ├── seg/                  # Core package
 │   ├── __init__.py
 │   ├── models.py         # DINOv2 encoder + U-shaped decoder + deep supervision
