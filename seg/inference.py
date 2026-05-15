@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 
+from .checkpoints import load_model_state
 from .data import DATASET_SPECS, DatasetSpec
 from .models import DinoV2UNet
 
@@ -33,6 +34,8 @@ def export_dataset_masks(
     threshold: float = 0.5,
     device: Optional[str] = None,
     seed: int = 42,
+    fold_idx: int = 0,
+    num_folds: int = 1,
     spec: Optional[DatasetSpec] = None,
 ):
     """Export predicted segmentation masks for a dataset.
@@ -57,6 +60,8 @@ def export_dataset_masks(
         threshold: Binarization threshold for predictions.
         device: Target device (auto-detected if None).
         seed: Random seed for reproducibility.
+        fold_idx: Fold index for K-fold split reconstruction.
+        num_folds: Number of folds for K-fold split reconstruction.
         spec: Dataset specification (auto-resolved if None).
     """
     if spec is None:
@@ -82,18 +87,12 @@ def export_dataset_masks(
     ).to(device)
 
     if checkpoint_path:
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
-        state = ckpt.get("model", ckpt)
-        if isinstance(state, dict) and any(
-            k.startswith("module.") for k in state.keys()
-        ):
-            state = {k.replace("module.", "", 1): v for k, v in state.items()}
-        if isinstance(state, dict):
-            state = {
-                k: v for k, v in state.items()
-                if not (k.endswith("total_ops") or k.endswith("total_params") or k.startswith("aux_heads"))
-            }
-        missing, unexpected = model.load_state_dict(state, strict=False)
+        missing, unexpected = load_model_state(
+            model,
+            checkpoint_path,
+            drop_aux_heads=True,
+            strict=False,
+        )
         if unexpected:
             print(f"[warn] Unexpected keys in checkpoint: {unexpected}")
         if missing:
@@ -103,7 +102,15 @@ def export_dataset_masks(
     for split in splits:
         split_dir = os.path.join(save_dir, split)
         os.makedirs(split_dir, exist_ok=True)
-        dataset = spec.cls(data_dir, split, img_size, seed=seed, aug_mode="none")
+        dataset = spec.cls(
+            data_dir,
+            split,
+            img_size,
+            seed=seed,
+            aug_mode="none",
+            fold_idx=fold_idx,
+            num_folds=num_folds,
+        )
         loader = DataLoader(
             dataset, batch_size=1, shuffle=False,
             num_workers=num_workers, pin_memory=True,

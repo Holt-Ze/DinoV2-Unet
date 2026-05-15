@@ -20,23 +20,17 @@ Usage:
 import argparse
 import os
 
-import torch
-from torch.utils.data import DataLoader
-
-from seg.data import DATASET_ALIASES, DATASET_SPECS, resolve_data_dir, resolve_dataset_key
-from seg.models import DinoV2UNet
-from seg.training import evaluate
-from seg.inference import export_dataset_masks
+DATASET_KEYS = ("clinicdb", "colondb", "etis", "kvasir")
 
 
-def parse_args():
+def parse_args(args=None):
     """Parse command-line arguments for evaluation."""
     parser = argparse.ArgumentParser(
         description="Evaluate a trained DINOv2-UNet checkpoint."
     )
     parser.add_argument(
         "--dataset", required=True,
-        help=f"Dataset key ({', '.join(sorted(DATASET_SPECS.keys()))}).",
+        help=f"Dataset key ({', '.join(DATASET_KEYS)}).",
     )
     parser.add_argument(
         "--data-dir", dest="data_dir", type=str, default=None,
@@ -53,6 +47,8 @@ def parse_args():
     parser.add_argument("--freeze-blocks-until", type=int, default=6)
     parser.add_argument("--decoder-dropout", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--fold", type=int, default=0)
+    parser.add_argument("--num-folds", type=int, default=1)
     parser.add_argument("--no-tta", action="store_true",
                         help="Disable Test Time Augmentation.")
     parser.add_argument("--device", type=str, default=None,
@@ -74,11 +70,20 @@ def parse_args():
     parser.add_argument("--export-dir", type=str, default=None,
                         help="Directory for exported masks (default: alongside checkpoint).")
 
-    return parser.parse_args()
+    return parser.parse_args(args)
 
 
 def main():
     """Main evaluation entry point."""
+    import torch
+    from torch.utils.data import DataLoader
+
+    from seg.checkpoints import load_model_state
+    from seg.data import DATASET_SPECS, resolve_data_dir_from_root, resolve_dataset_key
+    from seg.inference import export_dataset_masks
+    from seg.models import DinoV2UNet
+    from seg.training import evaluate
+
     args = parse_args()
     dataset_key = resolve_dataset_key(args.dataset)
 
@@ -89,7 +94,7 @@ def main():
         )
 
     spec = DATASET_SPECS[dataset_key]
-    data_dir = resolve_data_dir(spec, args.data_dir)
+    data_dir = resolve_data_dir_from_root(spec, args.data_dir)
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
 
     if not os.path.isdir(data_dir):
@@ -117,14 +122,12 @@ def main():
     ).to(device)
 
     # Load checkpoint
-    ckpt = torch.load(args.checkpoint, map_location="cpu")
-    state = ckpt.get("model", ckpt)
-    if isinstance(state, dict):
-        state = {
-            k: v for k, v in state.items()
-            if not (k.endswith("total_ops") or k.endswith("total_params") or k.startswith("aux_heads"))
-        }
-    missing, unexpected = model.load_state_dict(state, strict=False)
+    missing, unexpected = load_model_state(
+        model,
+        args.checkpoint,
+        drop_aux_heads=True,
+        strict=False,
+    )
     if unexpected:
         print(f"[warn] Unexpected keys: {unexpected}")
     if missing:
@@ -132,7 +135,13 @@ def main():
 
     # Build test dataset and loader
     test_ds = spec.cls(
-        data_dir, "test", args.img_size, seed=args.seed, aug_mode="none",
+        data_dir,
+        "test",
+        args.img_size,
+        seed=args.seed,
+        aug_mode="none",
+        fold_idx=args.fold,
+        num_folds=args.num_folds,
     )
     test_loader = DataLoader(
         test_ds, batch_size=args.batch_size * 2, shuffle=False,
@@ -183,6 +192,8 @@ def main():
             checkpoint_path=args.checkpoint,
             device=device,
             seed=args.seed,
+            fold_idx=args.fold,
+            num_folds=args.num_folds,
         )
         print("Mask export complete.")
 
